@@ -1,0 +1,101 @@
+---
+title: "Visualize AVL Tree Traversals"
+sidebarTitle: "Watch Roads"
+description: "Use the Watch Roads view to trigger pre-order, in-order, and post-order traversals and watch obstacle nodes highlight in sequence on the D3.js SVG tree."
+---
+
+The Watch Roads view is where the AVL tree comes to life. After obstacles have been added to the road, you can switch to this full-screen view to trigger tree traversals — pre-order, in-order, or post-order — and watch each obstacle node highlight in the D3.js SVG as the backend streams the traversal sequence back over Socket.IO. The view also exposes the **Delete/Remove** button for removing individual obstacles (see [Delete an Obstacle](/guides/delete-obstacle)).
+
+## Prerequisites
+
+At least one obstacle must have been added to the road. The **Remove & Watch Roads** button (`#btn-watch-roads`) remains disabled on the home screen until either:
+
+- An obstacle was successfully inserted through **Insert Obstacles**, or
+- Obstacles were loaded via **Load JSON**.
+
+If you click **Remove & Watch Roads** without any obstacles present, the application shows a toast message and redirects you to the **Insert Obstacles** dialog instead.
+
+## Steps
+
+<Steps>
+  <Step title="Click Remove & Watch Roads">
+    Click the **Remove & Watch Roads** button (`#btn-watch-roads`) on the home screen. `HomeController` instantiates `WatchRoadsController` (if not already created) and calls `WatchRoadsController.init()`.
+  </Step>
+
+  <Step title="The view loads and the tree renders">
+    `WatchRoadsController.init()` performs three actions in sequence:
+
+    1. **Replaces `<main>` content** — fetches `watchRoads.html` and sets it as `main.innerHTML`, replacing the home screen buttons with the Watch Roads layout (traversal buttons, a **Back** button, a **Delete/Remove** button, and the tree SVG container).
+    2. **Initialises the AVL renderer** — calls `avlCtrl.init()`, which sets up the D3.js SVG element (`#tree-svg`), clears any previous drawing, and re-registers the `avl_tree_balanced` DOM event listener.
+    3. **Requests the current tree** — calls `avlCtrl.getTree()`, which emits `get_tree_avl` to the backend via Socket.IO.
+
+    The backend responds with the `avl_tree_balanced` Socket.IO event containing the current tree structure. `AVLController.initDataTree()` receives the data, formats each node's `x`, `y`, and `type` fields by looking up the corresponding `Obstacle` in the road model, and renders the full tree with D3.js. Each node appears as a circle with its obstacle SVG icon and a coordinate label `(x, y)` below it.
+  </Step>
+
+  <Step title="Trigger a traversal">
+    Three traversal buttons are available in the button bar:
+
+    | Button label | Button ID | Socket.IO emit | Socket.IO receive | DOM event dispatched |
+    |---|---|---|---|---|
+    | Pre‑Order | `#btn-pre` | `road_preorder` | `preorder` | `pre-order` |
+    | In‑Order | `#btn-in` | `road_inorder` | `inorder` | `in-order` |
+    | Pos‑Order | `#btn-pos` | `road_posorder` | `posorder` | `pos-order` |
+
+    Clicking any traversal button:
+
+    1. Calls `__resetFocusAll()` — removes the CSS class `current` from every obstacle circle in the SVG, clearing any previous highlights.
+    2. Calls `avlCtrl.service.emit_get_road('<order>')`, which emits the corresponding Socket.IO event to the backend (e.g. `road_preorder`).
+
+    ```js
+    // WatchRoadsController — pre-order handler
+    __pre(ev) {
+        this.__resetFocusAll();
+        this.avlCtrl.service.emit_get_road('preorder');
+    }
+    ```
+  </Step>
+
+  <Step title="Watch the nodes highlight">
+    As the backend processes the traversal it streams node IDs back one at a time. For each emitted ID, `TreeService` receives the Socket.IO event (e.g. `preorder`) and dispatches a matching DOM `CustomEvent` (e.g. `pre-order`) with the node ID as `event.detail`.
+
+    `WatchRoadsController.__eventRoadFocus()` handles all three DOM events and calls `__focusNodeInRoad(id)`:
+
+    ```js
+    __focusNodeInRoad(id) {
+        const current = this.elements.obstacles[id];
+        current.classList.add('current');
+        current.focus();
+    }
+    ```
+
+    The SVG circle whose `id` attribute matches `_<obstacleId>` receives the `current` CSS class, highlighting it in the tree. Nodes light up sequentially as the backend emits each one.
+  </Step>
+
+  <Step title="Reset or run another traversal">
+    To run a different traversal, simply click another traversal button. `__resetFocusAll()` clears all existing `current` classes before the new traversal begins, so the visualization always starts from a clean state.
+  </Step>
+
+  <Step title="Navigate back to the home screen">
+    Click the **Back** button (`#btn-back`) in the top-left corner. This calls `homeCtrl.init(true)`, which reloads the home screen HTML into `<main>` and calls `avlCtrl.init(true)` to re-render the AVL tree panel on the right side of the home layout. Controller instances and road data are preserved — nothing is reset.
+  </Step>
+</Steps>
+
+<Note>
+  Each traversal highlights nodes **sequentially** as the backend emits them over Socket.IO. The timing between highlights depends entirely on how fast the backend streams the individual `preorder` / `inorder` / `posorder` events. There is no client-side animation delay — each node highlights the moment its ID arrives.
+</Note>
+
+## Deleting an obstacle from this view
+
+The **Delete/Remove** button (`#btn-del`) in the button bar opens the Delete Obstacle dialog. See the [Delete an Obstacle](/guides/delete-obstacle) guide for the full workflow.
+
+## Element mapping
+
+When the tree is first rendered, `WatchRoadsController.__getElements()` builds a lookup map from obstacle IDs to their corresponding SVG circle DOM elements:
+
+```js
+__allObstacles.forEach((obs) => {
+    this.elements.obstacles[obs.id] = document.querySelector(`#_${obs.id}`);
+});
+```
+
+This map is what allows the traversal event handlers to find and highlight the right circle instantly without querying the DOM on every event.

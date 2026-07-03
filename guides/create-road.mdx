@@ -1,0 +1,88 @@
+---
+title: "Create a Road and Initialize the Canvas"
+sidebarTitle: "Create Road"
+description: "Learn how to create a road in AVL Tree Car Front, set its width, and initialize the canvas before adding obstacles to the AVL tree."
+---
+
+Before any obstacles can be placed or visualized, the application needs a road. The road defines the coordinate space — specifically, it sets the maximum X boundary for obstacle placement and measures the visible canvas height so that every obstacle lands within the rendered area. Creating a road also resets the backend AVL tree, giving you a clean slate for a new session.
+
+## Overview
+
+The **Create Road** button is always enabled on the home screen. Clicking it opens a small modal dialog where you supply a road width. Once confirmed, the application sets up the road dimensions, resets the backend tree, and automatically opens the **Add Obstacles** dialog so you can begin inserting obstacles right away.
+
+<Warning>
+  Confirming the Create Road dialog emits a `reset_avl` Socket.IO event to the backend. **All previously inserted obstacles are cleared from the AVL tree.** If you need to preserve an existing tree, use **Load JSON** to restore it after creation.
+</Warning>
+
+## Steps
+
+<Steps>
+  <Step title="Open the home screen">
+    Navigate to the application root. The home screen renders five action buttons on the left panel. The **Create Road** button (`#btn-create-road`) is always active — it does not require any prior state.
+  </Step>
+
+  <Step title="Click Create Road">
+    Click the **Create Road** button. The `RoadController.init()` method is called, which:
+
+    1. Fetches `roadAddMenu.html` and injects it as the modal content.
+    2. Inserts the road canvas into `<main>` by loading `road.html`.
+    3. Displays the modal dialog titled **Create Road**.
+  </Step>
+
+  <Step title="Set the Road Width">
+    The modal contains a single form field:
+
+    | Field | Type | Min | Step | Default | Element ID |
+    |-------|------|-----|------|---------|------------|
+    | Road Width | `number` | `500` | `10` | `500` | `#inp-road-width` |
+
+    Enter a value of **500 or greater** (in pixels). This value defines the maximum X coordinate that obstacles may occupy. The form also displays a reminder: *Minimum: 500*.
+
+    ```html
+    <input type="number" name="width-road" min="500" value="500" step="10"
+           id="inp-road-width" placeholder="3500" required />
+    ```
+  </Step>
+
+  <Step title="Confirm the dialog">
+    Click **Accept**. The `RoadController.#addActionMenu()` method runs the following sequence:
+
+    1. **Validates** the form — if the input is empty or invalid, a warning toast is shown and the action stops.
+    2. **Reads dimensions** from the live DOM:
+       - `width` — the numeric value from `#inp-road-width`.
+       - `height` — computed from the `#road-container` element's CSS height.
+       - `top` — computed from the `#road-container` element's CSS `top` property (defaults to `0` if `NaN`).
+    3. **Calls `road.setSizes({ width, height, top })`** on the `Road` model, persisting the dimensions client-side.
+    4. **Emits `reset_avl`** via Socket.IO (`TreeService.emit_reset_avl()`) to clear the backend tree.
+    5. **Dispatches the `road-created` DOM event**, which `HomeController` listens for and uses to automatically trigger a click on the **Insert Obstacles** button — opening the Add Obstacles dialog immediately.
+    6. Shows a success toast: *Road created successfully!*
+  </Step>
+
+  <Step title="Continue to Add Obstacles">
+    After confirmation, the **Add Obstacles** dialog opens automatically. You do not need to click anything else. If you want to add obstacles later, the **Insert Obstacles** button is now enabled and can be clicked at any time.
+  </Step>
+</Steps>
+
+## Road model properties
+
+After creation, the `Road` model instance holds three geometry properties used throughout the application:
+
+| Property | Source | Description |
+|----------|--------|-------------|
+| `width` | `#inp-road-width` input value | Maximum X coordinate for obstacle placement |
+| `height` | `#road-container` computed CSS height | Maximum Y coordinate for obstacle placement |
+| `top` | `#road-container` computed CSS `top` | Vertical offset of the road canvas |
+
+These values are consumed by `ObstaclesController` to compute the valid min/max ranges for X and Y when adding obstacles:
+
+```js
+// From ObstaclesController.#addLimitsAttributtes()
+const maxX = road.getWidth() - 15;
+const minX = parseInt(maxX * 0.05); // ~5 % of road width
+const maxY = road.getHeight();
+const minY = 5;
+```
+
+<Note>
+  The `Road` model is instantiated once per `RoadController` and reused throughout the session. Clicking **Create Road** a second time will not create a second controller instance — `HomeController` guards against overwriting the existing one.
+</Note>

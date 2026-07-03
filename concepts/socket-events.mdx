@@ -1,0 +1,199 @@
+---
+title: "Socket.IO Events Reference"
+sidebarTitle: "Socket Events"
+description: "Complete reference for all Socket.IO events emitted and received by AVL Tree Car Front on the AVLTree namespace, including payloads and DOM events triggered."
+---
+
+AVL Tree Car Front uses Socket.IO for real-time, bidirectional communication with the Python backend. Every event travels through a two-layer architecture: `SocketService` owns the raw connection, and `TreeService` extends it with every domain-specific event handler and emitter. Controllers never touch the socket directly — they listen to DOM `CustomEvent` objects instead.
+
+## Namespace
+
+All events belong to the `AVLTree` namespace. The full socket URL is constructed at startup from `configs.urlSOCKET`:
+
+```javascript
+// src/app/services/Socket.service.js
+constructor(channel = '/') {
+    this.socketURL = channel === '/'
+        ? `${configs.urlSOCKET}/`
+        : `${configs.urlSOCKET}/${channel}`;
+    this.socketio = io(this.socketURL);
+    this.on_connect_error();
+}
+```
+
+When `TreeService` calls `super('AVLTree')`, the resulting URL becomes `http://localhost:4500/AVLTree`.
+
+## Base class: SocketService
+
+`SocketService` handles the lowest-level connection concerns. It exposes `this.socketio` (the raw `io()` instance) and registers a `connect_error` handler that logs the error message when the connection is actively denied by the server:
+
+```javascript
+on_connect_error() {
+    this.socketio.on('connect_error', (error) => {
+        if (this.socketio.active) {
+            // Temporary failure — socket will auto-reconnect
+        } else {
+            // Server denied the connection
+            console.log(error.message);
+        }
+    });
+}
+```
+
+<Note>
+  The raw Socket.IO client (`socket.io.min.js`) is loaded as a vendored file from `src/app/utils/socket-io/` and accessed via the global `io` function. There is no npm install step.
+</Note>
+
+## TreeService
+
+`TreeService extends SocketService` and is the single class that wires every AVL-tree Socket.IO event. Its constructor calls `super('AVLTree')` and then registers all receive handlers immediately:
+
+```javascript
+// src/app/services/Tree.service.js
+constructor() {
+    super('AVLTree');
+    this.on_connect();
+    this.on_disconnect();
+    this.on_obstacle_inserted();
+    this.on_road_preorder();
+    this.on_road_inorder();
+    this.on_road_posorder();
+    this.on_avl_tree_balanced();
+    this.on_avl_reseted();
+}
+```
+
+A `TreeService` instance is created once inside `HomeController.init()` and passed down to `RoadController` and `AVLController` so every part of the app shares the same underlying socket connection.
+
+## Emitted events (front end → backend)
+
+These are events that the front end sends to the Python backend over Socket.IO.
+
+| Event name | Method | Payload | Description |
+|---|---|---|---|
+| `insert_obstacle` | `emit_insert_obstacle(data)` | Obstacle object `{ x, y, type }` | Insert a new obstacle into the AVL tree |
+| `get_tree_avl` | `emit_get_tree(data = {})` | `{}` | Request the current balanced AVL tree |
+| `reset_avl` | `emit_reset_avl(data = {})` | `{}` | Reset / clear the AVL tree on the backend |
+| `remove_obstacle` | `emit_remove_obstacle(data = {})` | `{}` | Remove an obstacle from the tree |
+| `road_preorder` | `emit_get_road('preorder')` | `{}` | Request a pre-order traversal |
+| `road_inorder` | `emit_get_road('inorder')` | `{}` | Request an in-order traversal |
+| `road_posorder` | `emit_get_road('posorder')` | `{}` | Request a post-order traversal |
+
+The three traversal events share a single emitter method that prepends `road_` to the traversal name:
+
+```javascript
+// src/app/services/Tree.service.js
+emit_get_road(road_name, data = {}) {
+    this.socketio.emit(`road_${road_name}`, data);
+}
+```
+
+<Tip>
+  `emit_reset_avl()` is called in two places: by `HomeController` on startup (to sync front end and back end after a reload) and by `RoadController` when the user creates a new road (to prevent coordinate confusion from the previous session).
+</Tip>
+
+## Received events (backend → front end)
+
+These are events that arrive from the Python backend. Every meaningful event is immediately re-dispatched as a DOM `CustomEvent` so controllers can react without importing or referencing `TreeService` directly.
+
+| Socket event | DOM `CustomEvent` dispatched | `detail` shape | Description |
+|---|---|---|---|
+| `connected` | — | — | Backend confirms the Socket.IO connection is established |
+| `avl_tree_balanced` | `avl_tree_balanced` | Tree root node object | Full balanced AVL tree for rendering |
+| `preorder` | `pre-order` | Obstacle `id` (string) | Next node ID in the pre-order traversal sequence |
+| `inorder` | `in-order` | Obstacle `id` (string) | Next node ID in the in-order traversal sequence |
+| `posorder` | `pos-order` | Obstacle `id` (string) | Next node ID in the post-order traversal sequence |
+| `avl_reseted` | `avl_reseted` | `{}` | Confirms the AVL tree was reset on the backend |
+| `obstacles_inserted` | — | — | Confirms an obstacle was successfully inserted |
+
+<Note>
+  The `connected` and `obstacles_inserted` events are handled silently (a `console.log` for `connected`; an empty handler for `obstacles_inserted`). They do not dispatch DOM events and are not consumed by any controller.
+</Note>
+
+## DOM event bridge pattern
+
+Instead of importing `TreeService` into every controller, the app uses a pub/sub pattern built on the browser's own event system. `TreeService` acts as the sole subscriber to Socket.IO events. For each meaningful event it creates a `CustomEvent` and dispatches it on `document`, which any module can listen to without any coupling to the socket layer:
+
+```
+Backend
+  │  (Socket.IO event)
+  ▼
+TreeService.on_*()                   ← only place that touches socket.io
+  │  document.dispatchEvent(
+  │      new CustomEvent('event-name', { detail: payload })
+  │  )
+  ▼
+document  (DOM event bus)
+  │  document.addEventListener('event-name', handler)
+  ▼
+Controller (AVLController, WatchRoadsController, …)
+```
+
+This means controllers can be instantiated, destroyed, and re-created independently of the socket lifecycle, which matters in a SPA where the same `TreeService` instance persists for the whole page lifetime.
+
+### Code example: `on_avl_tree_balanced`
+
+The following is the real source of the most important receive handler. It safely falls back to an empty object when the backend sends no payload, then wraps the data in a `CustomEvent` and dispatches it globally:
+
+```javascript
+// src/app/services/Tree.service.js
+on_avl_tree_balanced() {
+    this.socketio.on('avl_tree_balanced', (ev) => {
+        const data = ev.data ?? {};
+        const event = new CustomEvent('avl_tree_balanced', { detail: data });
+        document.dispatchEvent(event);
+    });
+}
+```
+
+`AVLController` registers its listener on `document` inside `listenGetTreeFromBackend()`:
+
+```javascript
+// src/app/controllers/AVL.controller.js
+listenGetTreeFromBackend() {
+    document.addEventListener('avl_tree_balanced', (event) => {
+        this.initDataTree(event);
+    });
+}
+```
+
+### Traversal events
+
+The three traversal handlers follow the same bridge pattern. Each receives a single obstacle `id` from the backend inside `ev.data` and forwards it as `detail` on the corresponding DOM event:
+
+```javascript
+// src/app/services/Tree.service.js
+on_road_preorder() {
+    this.socketio.on('preorder', (ev) => {
+        const event = new CustomEvent('pre-order', { detail: ev.data });
+        document.dispatchEvent(event);
+    });
+}
+
+on_road_inorder() {
+    this.socketio.on('inorder', (ev) => {
+        const event = new CustomEvent('in-order', { detail: ev.data });
+        document.dispatchEvent(event);
+    });
+}
+
+on_road_posorder() {
+    this.socketio.on('posorder', (ev) => {
+        const event = new CustomEvent('pos-order', { detail: ev.data });
+        document.dispatchEvent(event);
+    });
+}
+```
+
+`WatchRoadsController` listens to all three DOM events and calls `__focusNodeInRoad(id)` to add the `current` CSS class to the matching SVG circle, creating a step-by-step visual walkthrough of the tree:
+
+```javascript
+// src/app/controllers/WatchRoads.controller.js
+this.__addListener(document, 'pre-order',  this.__eventRoadFocus.bind(this));
+this.__addListener(document, 'in-order',   this.__eventRoadFocus.bind(this));
+this.__addListener(document, 'pos-order',  this.__eventRoadFocus.bind(this));
+```
+
+<Warning>
+  Socket event names (e.g. `preorder`) and their corresponding DOM event names (e.g. `pre-order`) are not identical. Always use the DOM event name when calling `document.addEventListener` from a controller.
+</Warning>

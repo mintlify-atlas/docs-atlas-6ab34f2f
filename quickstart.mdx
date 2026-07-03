@@ -1,47 +1,84 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with AVL Tree Car Front"
+sidebarTitle: "Quickstart"
+description: "Clone AVL Tree Car Front, configure the backend URL, and open the SPA with a Live Server to start visualizing AVL trees in under 5 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+AVL Tree Car Front is a zero-build SPA — there are no dependencies to install and no compilation step. Getting it running is a matter of cloning the repo, making sure the backend is up, and opening `src/index.html` through an HTTP server. The steps below walk you through the whole process.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+<Warning>
+  The app **must** be served over HTTP using a Live Server (or equivalent). Opening `src/index.html` directly in the browser via `file://` will not work because the application loads HTML partials, CSS, and JavaScript assets using relative paths that require an HTTP context to resolve correctly.
+</Warning>
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+
+  <Step title="Start the ATC backend">
+    AVL Tree Car Front has no logic of its own for managing the tree — all insertions, deletions, rebalancing, and traversal data are handled by the Python backend. The backend must be running and reachable before you open the front end.
+
+    Follow the setup instructions in the [ATC backend repository](https://github.com/tutosrive/avl_tree_car) and confirm the server is listening on `http://localhost:4500` (the default). The front end will fail silently if the backend is unreachable at startup.
+  </Step>
+
+  <Step title="Clone the repository">
+    Clone the front-end repository to your local machine:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/tutosrive/avl_tree_car_front.git
     ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+    Then navigate into the cloned folder:
 
     ```bash
-    your-cli init
+    cd avl_tree_car_front
     ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
-    ```
+    No package manager or install command is needed — all vendor libraries (Bootstrap, Socket.IO client, D3.js) are already committed inside `src/app/utils/`.
   </Step>
+
+  <Step title="(Optional) Configure the backend URL">
+    If your backend runs on a host or port other than the default `http://127.0.0.1:4500`, open the configuration file and update both URL values before proceeding:
+
+    ```
+    src/app/assets/json/configs.json
+    ```
+
+    ```json
+    {
+        "urlAPI": "http://127.0.0.1:4500",
+        "urlSOCKET": "http://localhost:4500"
+    }
+    ```
+
+    - Set `urlAPI` to the base URL your backend exposes for REST endpoints.
+    - Set `urlSOCKET` to the URL the Socket.IO server is listening on.
+
+    If both the front end and backend are running locally on port `4500`, no change is needed. See the [Configuration](/configuration) page for full details.
+  </Step>
+
+  <Step title="Open src/index.html with a Live Server">
+    Use any HTTP-based live-reload server to open the entry point. The most common option is the **Live Server** extension for VS Code:
+
+    1. Install the [Live Server extension](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer) in VS Code.
+    2. Open the cloned `avl_tree_car_front` folder in VS Code.
+    3. Right-click `src/index.html` in the Explorer panel and choose **Open with Live Server**.
+
+    Your browser will open a tab pointing to something like `http://127.0.0.1:5500/src/index.html`. The app loads its HTML, CSS, and JS assets over HTTP, connects to the Socket.IO backend, and fetches the obstacle type definitions from the REST API — all automatically on page load.
+
+    <Tip>
+      Any other local HTTP server works equally well. For example, Python's built-in server (`python -m http.server 5500` run from the `src/` directory) or the `serve` CLI tool are both valid alternatives to the VS Code extension.
+    </Tip>
+  </Step>
+
+  <Step title="Start using the app">
+    Once the page loads, you will see the AVL Tree Car Game interface with a dark Bootstrap Vapor theme. Two primary actions are available from the start:
+
+    - **Create Road** — initializes a fresh road on the backend and unlocks the **Add Obstacles** button so you can start inserting tree nodes one at a time.
+    - **Load JSON** — loads a full set of obstacles from a JSON configuration, replacing any existing road data on the backend.
+
+    After populating the tree, use **Watch Roads** to visualize the AVL tree and step through pre-order, in-order, and post-order traversals. Individual nodes can be deleted directly from that view.
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+<Note>
+  Every time the page is reloaded, the front-end state resets completely to zero — the application always starts fresh in the browser. However, the Python backend retains its tree history across reloads. To avoid the front end and backend falling out of sync, click **Create Road** after each page reload to reset the backend's AVL tree and start from a clean state on both sides.
+</Note>

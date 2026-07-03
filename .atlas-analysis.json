@@ -1,0 +1,97 @@
+{
+  "projectType": "frontend",
+  "projectName": "AVL Tree Car Front",
+  "projectDescription": "A single-page application that visualizes an AVL tree of road obstacles in real time, communicating with a Python backend over Socket.IO to insert, remove, and traverse obstacles using pre-order, in-order, and post-order traversals.",
+  "theme": "palm",
+  "primaryColor": "#6900be",
+  "lightColor": "#a855f7",
+  "darkColor": "#040116",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/avl-tree",
+              "concepts/obstacles",
+              "concepts/socket-events"
+            ]
+          },
+          {
+            "group": "User Guide",
+            "pages": [
+              "guides/create-road",
+              "guides/load-json",
+              "guides/add-obstacles",
+              "guides/watch-roads",
+              "guides/delete-obstacle"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/models",
+              "reference/controllers",
+              "reference/services",
+              "reference/json-format"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time AVL tree visualization using D3.js rendered as SVG",
+    "Socket.IO integration for live communication with a Python backend",
+    "Add obstacles manually (type, X/Y coordinates) or bulk-load from a JSON file",
+    "Tree traversal visualization: pre-order, in-order, and post-order",
+    "Delete/remove obstacles from the AVL tree with coordinate-based lookup",
+    "Animated SVG car sprite with dynamic color customization",
+    "Bootstrap Vapor dark-theme SPA with no page reloads",
+    "Road width configuration before starting obstacle management"
+  ],
+  "publicApiSurface": [
+    "TreeService.emit_insert_obstacle(data)",
+    "TreeService.emit_get_road(road_name, data)",
+    "TreeService.emit_get_tree(data)",
+    "TreeService.emit_reset_avl(data)",
+    "TreeService.emit_remove_obstacle(data)",
+    "AVLController.send_roads_to_backend(data)",
+    "AVLController.getTree()",
+    "AVLController.initDataTree(event)",
+    "Road.setObstacle(obstacle)",
+    "Road.setObstacles(obstacles)",
+    "Road.getObstacles()",
+    "Road.removeObstacle(coordinates)",
+    "Road.getObstacleById(id)",
+    "Obstacle(data: {id, x, y, type, is_type_str})",
+    "Car(intialPos, aceleration, velocity, jumpDistanceY, battery, colors)",
+    "LoadJSONController.init()",
+    "ObstaclesController.init(roadCtrl, AVLCtrl, homeCtrl)",
+    "WatchRoadsController.init()",
+    "HomeController.init(isReload)",
+    "POST /avl/node/add",
+    "POST /avl/node/remove",
+    "POST /avl/add/configs",
+    "GET /data/json/obstacles_types.json",
+    "Socket event: insert_obstacle",
+    "Socket event: get_tree_avl",
+    "Socket event: reset_avl",
+    "Socket event: remove_obstacle",
+    "Socket event: road_preorder / road_inorder / road_posorder",
+    "Socket event (incoming): avl_tree_balanced",
+    "Socket event (incoming): preorder / inorder / posorder",
+    "Socket event (incoming): avl_reseted"
+  ]
+}

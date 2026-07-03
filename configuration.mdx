@@ -1,0 +1,108 @@
+---
+title: "Configure API and Socket.IO URLs"
+sidebarTitle: "Configuration"
+description: "Learn how to set the backend REST API and Socket.IO URLs for AVL Tree Car Front using the configs.json file in the assets directory."
+---
+
+AVL Tree Car Front reads a single JSON file at startup to discover where the backend lives. All REST calls and the Socket.IO connection are routed through the two URLs declared in that file. Changing either value — for example, when the backend runs on a non-default port or on a remote server — requires only a quick edit before you reload the page.
+
+## Config File Location
+
+The configuration file lives at:
+
+```
+src/app/assets/json/configs.json
+```
+
+## Default Configuration
+
+```json
+{
+    "urlAPI": "http://127.0.0.1:4500",
+    "urlSOCKET": "http://localhost:4500"
+}
+```
+
+Both keys default to the same machine and port (`4500`) that the ATC backend uses out of the box. In most local development setups you do not need to change anything.
+
+## Configuration Keys
+
+### `urlAPI`
+
+The base URL for all REST HTTP requests. AVL Tree Car Front calls the following endpoints on this base URL:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/avl/node/add` | Insert a new obstacle node into the AVL tree |
+| `POST` | `/avl/node/remove` | Delete an obstacle node from the AVL tree |
+| `POST` | `/avl/add/configs` | Push a full obstacle configuration (Load JSON flow) |
+| `GET` | `/data/json/obstacles_types.json` | Fetch the list of available obstacle type definitions |
+
+No trailing slash is needed — the application appends paths directly to whatever value you set here.
+
+### `urlSOCKET`
+
+The base URL of the Socket.IO server. The application connects to the **`AVLTree` namespace** by appending it to this value at runtime:
+
+```
+${urlSOCKET}/AVLTree
+```
+
+So with the default value the full Socket.IO endpoint is:
+
+```
+http://localhost:4500/AVLTree
+```
+
+All real-time tree update events travel over this connection. If the Socket.IO server moves to a different host or port, update this key accordingly.
+
+## How the Config Is Consumed
+
+`configs.json` is loaded once, immediately when the page initialises. Inside `main.mjs`, the `App` class reads the file through a helper utility and stores both values as globals that every controller can access:
+
+```js
+// src/app/assets/js/main.mjs (App.#globalVariables)
+window.configs = await Helpers.fetchJSON('./app/assets/json/configs.json');
+window.URLAPI  = configs.urlAPI;
+```
+
+After that, `window.URLAPI` is used throughout all controllers and services whenever a REST request is made, and `configs.urlSOCKET` is used by `SocketService` to open the Socket.IO connection to `${configs.urlSOCKET}/AVLTree`.
+
+The obstacle type definitions are also fetched during this same startup phase:
+
+```js
+const response = await Helpers.fetchJSON(`${URLAPI}/data/json/obstacles_types.json`);
+window.OBSTACLES_TYPES = response.data;
+```
+
+This means the backend must be reachable at the configured `urlAPI` before — or immediately as — the page loads, otherwise the obstacle type list will not populate and parts of the UI will be unavailable.
+
+## Common Scenarios
+
+**Backend on a different port**
+
+If you started the ATC backend on port `8000` instead of `4500`, update both keys:
+
+```json
+{
+    "urlAPI": "http://127.0.0.1:8000",
+    "urlSOCKET": "http://localhost:8000"
+}
+```
+
+**Backend on a remote or networked machine**
+
+Replace `127.0.0.1` / `localhost` with the actual IP address or hostname:
+
+```json
+{
+    "urlAPI": "http://192.168.1.42:4500",
+    "urlSOCKET": "http://192.168.1.42:4500"
+}
+```
+
+After editing the file, reload the page (via your Live Server) for the new values to take effect.
+
+<Warning>
+  Both URLs are resolved from inside the **browser**, not from the server that hosts the front end. This means the backend must be directly reachable from the user's browser, and **CORS must be enabled on the ATC backend** for the front-end origin. If CORS is not configured on the backend, REST calls will be blocked by the browser and the Socket.IO handshake will fail.
+</Warning>

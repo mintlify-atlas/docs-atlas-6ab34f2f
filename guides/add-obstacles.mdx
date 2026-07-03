@@ -1,0 +1,123 @@
+---
+title: "Add Obstacles to the Road"
+sidebarTitle: "Add Obstacles"
+description: "Add typed obstacles at precise X/Y pixel coordinates to the road and insert them into the backend AVL tree using the Add Obstacles dialog."
+---
+
+Once a road exists, you can populate it with obstacles. Each obstacle is placed at an exact pixel coordinate within the road canvas and is assigned a type — a cone, rock, tire, and so on. When you submit the form, the coordinate and type are sent to the backend via `POST /avl/node/add`, the backend inserts the obstacle into the AVL tree, and the D3.js tree visualization redraws automatically to reflect the new state. You can add as many obstacles as you like without closing the dialog.
+
+## Prerequisites
+
+A road must exist before you can insert obstacles. The **Insert Obstacles** button (`#btn-insert-obstacles`) is disabled on the home screen until either:
+
+- A road has been created with the **Create Road** dialog, or
+- Obstacles have been loaded with **Load JSON**.
+
+If you click **Insert Obstacles** before a road exists, the application shows a warning toast and automatically opens the **Create Road** dialog for you.
+
+## Steps
+
+<Steps>
+  <Step title="Click Insert Obstacles">
+    Click the **Insert Obstacles** button (`#btn-insert-obstacles`) on the home screen. `HomeController` ensures that both `AVLController` and `ObstaclesController` are initialised, then calls `ObstaclesController.init(roadCtrl, avlCtrl, homeCtrl)`.
+
+    The controller:
+    1. Fetches the `addObstacles.html` template.
+    2. Requests the obstacle types list from `GET /data/json/obstacles_types.json` and builds an `<option>` list.
+    3. Opens the **Add Obstacles** modal dialog.
+    4. Displays the valid coordinate ranges for the current road in the form.
+  </Step>
+
+  <Step title="Fill in the coordinate fields">
+    The form contains two number inputs for the pixel position of the obstacle on the road canvas:
+
+    | Field | Element ID | Min | Max | Description |
+    |-------|-----------|-----|-----|-------------|
+    | X | `#obstacle-x` | ~5 % of road width | Road width − 15 | Horizontal pixel position from the left edge |
+    | Y | `#obstacle-y` | `5` | Road height | Vertical pixel position from the top edge |
+
+    The dialog computes these ranges from the live `Road` model and displays them as helper text directly in the form so you always know the valid bounds:
+
+    ```js
+    // From ObstaclesController.#addLimitsAttributtes()
+    const maxX = road.getWidth() - 15;
+    const minX = parseInt(maxX * 0.05);  // approximately 5 % of road width
+    const maxY = road.getHeight();
+    const minY = 5;
+    ```
+
+    The `min` and `max` HTML attributes on both inputs are set dynamically to these values, so the browser's native validation also enforces them.
+  </Step>
+
+  <Step title="Select an obstacle type">
+    Choose a type from the **Obstacle Type** dropdown (`#types-obtacles`). The list is loaded dynamically from `GET /data/json/obstacles_types.json` at dialog open time.
+
+    | # | Type | SVG preview file |
+    |---|------|-----------------|
+    | 1 | Cone | `cone.svg` |
+    | 2 | Rock | `rock.svg` |
+    | 3 | Tree | `tree.svg` |
+    | 4 | Tire | `tire.svg` |
+    | 5 | Nail | `nail.svg` |
+    | 6 | Trunk | `trunk.svg` |
+    | 7 | Person | `person.svg` |
+    | 8 | Car | `car.svg` |
+    | 9 | Bicycle | `bicycle.svg` |
+    | 10 | Chair | `chair.svg` |
+
+    As soon as you pick a type, a preview image (`#obstacle-preview`) updates to show the corresponding SVG icon loaded from `./app/assets/img/svg/<type>.svg`. If you revert to the placeholder *Select Type* option, the preview shows the generic `obstacle.svg` image.
+  </Step>
+
+  <Step title="Click Add">
+    Click the **Add** button. `ObstaclesController.#addAction()` runs the following sequence:
+
+    1. **Validates the form** (`#form-obstacles`) — if any required field is empty or out of range, a warning toast is shown, the out-of-range error message is displayed inside the dialog, and the request is not sent.
+    2. **Shows an info toast**: *The data is sending to backend, please wait…*
+    3. **Disables all modal buttons** temporarily to prevent duplicate submissions.
+    4. **Constructs an `Obstacle` model instance** from the form data `{ x, y, type }`.
+    5. **POSTs to `/avl/node/add`**:
+
+    ```http
+    POST /avl/node/add
+    Content-Type: application/json
+
+    { "x": 100, "y": 50, "type": 1 }
+    ```
+
+    The `type` field is sent as the obstacle's numeric ID (the `value` attribute of the selected `<option>`).
+  </Step>
+
+  <Step title="Handle the response">
+    On `status 200` the controller:
+
+    1. Hides the error message container if it was visible.
+    2. Calls `avlCtrl.getTree()` — emits `get_tree_avl` to the backend, which responds with the updated balanced tree via the `avl_tree_balanced` Socket.IO event, triggering a full D3.js redraw.
+    3. Sets `obstacleObj.id` to the ID returned by the backend in `req.data`.
+    4. Calls `road.setObstacle(obstacleObj)` to append the new obstacle to the client-side road model.
+    5. Enables the **Remove & Watch Roads** button if at least one obstacle now exists.
+    6. Re-enables all modal buttons.
+
+    On a non-200 response, a danger toast is shown with the backend's error message, and an inline error is rendered inside the dialog.
+  </Step>
+
+  <Step title="Add more obstacles or close the dialog">
+    The modal **stays open** after a successful insertion. You can immediately enter the next obstacle's coordinates and type and click **Add** again. Repeat this for as many obstacles as needed.
+
+    When you are done, click **Accept** or **Cancel** to close the dialog. Both buttons call `ObstaclesController.#closeMenu()`, which removes the modal from the DOM and clears the `elements` reference map.
+  </Step>
+</Steps>
+
+<Tip>
+  The AVL tree visualization re-renders automatically after **each** successful obstacle insertion — you do not need to close the dialog or navigate away to see the tree update. The D3.js SVG in the right panel of the home screen refreshes in the background as soon as the backend's `avl_tree_balanced` Socket.IO event arrives.
+</Tip>
+
+## Coordinate validation details
+
+If a submitted value falls outside the allowed range, the controller calls `#validateMinAndMax()`, which builds an HTML error message and displays it in the `#obstacle-error-p` element inside the dialog. For example:
+
+```
+The value of X should be less than 985
+The value of Y should be greater than 5
+```
+
+The error panel is hidden (`visually-hidden`) by default and only becomes visible when validation fails. It is cleared automatically on the next successful add.

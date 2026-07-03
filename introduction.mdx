@@ -1,0 +1,53 @@
+---
+title: "AVL Tree Car Front: Browser-Based AVL Tree Visualizer"
+sidebarTitle: "Introduction"
+description: "AVL Tree Car Front is a vanilla JS SPA for visualizing and interacting with an AVL tree of road obstacles, backed by a Python Socket.IO server."
+---
+
+AVL Tree Car Front is a browser-based single-page application that lets you build and explore an AVL tree whose nodes represent road obstacles. The tree itself is managed server-side by a Python backend; the front end communicates with it in real time over Socket.IO and issues REST calls for insert and delete operations. Everything is rendered in the browser using vanilla JavaScript ES modules — no bundler, no framework, no build step required.
+
+## What It Does
+
+The application gives you a live, interactive view of an AVL tree as it grows and shrinks. Nodes represent road obstacles (speed bumps, potholes, barriers, and so on). You interact with the tree through a small toolbar, and the SVG visualization — powered by D3.js — updates automatically whenever the tree structure changes on the backend.
+
+### Core capabilities
+
+- **Create a road** — initializes a fresh road context on the backend and enables the obstacle controls.
+- **Add obstacles manually** — open the obstacles panel and insert individual nodes into the AVL tree one at a time.
+- **Bulk-load from JSON** — supply a JSON configuration file to load a full set of obstacles in one action (this replaces existing data, it does not append).
+- **Visualize tree traversals** — watch the tree highlighted in **pre-order**, **in-order**, and **post-order** sequences via the Watch Roads view.
+- **Delete nodes** — remove any obstacle/node from the tree directly in the Watch Roads view.
+
+## What Is NOT Included
+
+Per the project's own README, AVL Tree Car Front manages the AVL tree and its nodes only. The full car driving/game simulation — where a vehicle would actually navigate the road — is **not** part of this front end. This project is strictly the tree-management and visualization layer.
+
+## Backend Dependency
+
+AVL Tree Car Front requires the companion Python backend, **ATC (avl_tree_car)**, to be running before the front end is opened. All tree operations — insertions, deletions, rebalancing, and traversal data — are processed server-side. The backend must be reachable at `http://localhost:4500` (or a URL you configure). See the [ATC backend repository](https://github.com/tutosrive/avl_tree_car) for setup instructions.
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Vanilla JavaScript (ES modules) |
+| UI framework | Bootstrap 5 — Vapor dark theme |
+| Tree visualization | D3.js v7 (SVG rendering) |
+| Real-time communication | Socket.IO client (`/AVLTree` namespace) |
+| REST communication | `fetch` API |
+| Build tools | None — served directly via Live Server |
+
+## License
+
+AVL Tree Car Front is released under the **GNU General Public License v3.0 (GPL-3.0)**.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone the repo, point it at your backend, and open the app in under 5 minutes.
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/configuration">
+    Learn how to change the backend REST and Socket.IO URLs via `configs.json`.
+  </Card>
+</CardGroup>

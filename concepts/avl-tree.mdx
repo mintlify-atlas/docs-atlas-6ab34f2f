@@ -1,0 +1,231 @@
+---
+title: "AVL Tree: Server-Side Balance, Client-Side Rendering"
+sidebarTitle: "AVL Tree"
+description: "Learn how AVL Tree Car Front receives balanced tree data from the backend and renders it as an interactive D3.js SVG visualization."
+---
+
+The AVL tree at the heart of this project is managed entirely by the Python backend. The front end is responsible for one thing only: receiving the balanced tree structure that the server produces and turning it into an interactive SVG diagram using D3.js. This clean separation means all rotation, height-balancing, and traversal logic lives in Python while the JavaScript layer stays focused on presentation.
+
+## AVL model
+
+`AVL.model.mjs` is an intentionally thin class. Its only instance property is `root`, which starts as `null` and is replaced with the tree data whenever the backend sends an update. The `insert`, `delete`, and `to_dict` method declarations are present as stubs to document the interface, but contain no logic — the real implementations are on the server:
+
+```javascript
+// src/app/models/AVL.model.mjs
+export default class AVL {
+    /**@type {Node} */
+    root;
+    /**@type {Function} */
+    insert;
+    /**@type {Function} */
+    delete;
+    /**@type {Function} */
+    to_dict;
+
+    constructor() {
+        this.root = null;
+    }
+}
+```
+
+<Note>
+  Never call `avl.insert()` or `avl.delete()` directly from the front end. Use `TreeService.emit_insert_obstacle()` or `TreeService.emit_remove_obstacle()` instead and let the backend perform the operation, then wait for the `avl_tree_balanced` event to redraw the tree.
+</Note>
+
+## Node model
+
+`Node.model.mjs` extends `NodeI`, the interface defined in `interfaces/Node.interface.mjs`. The interface declares the four core AVL-node fields:
+
+```javascript
+// src/app/interfaces/Node.interface.mjs
+export default class NodeI {
+    /**@type {String} */  key;
+    /**@type {Node} */    left;
+    /**@type {Node} */    right;
+    /**@type {Number} */  height;
+}
+```
+
+In practice the objects that arrive from the backend via the `avl_tree_balanced` event carry additional properties. After `AVLController.__formatNodes()` runs, each node in the tree also carries:
+
+| Property | Source | Description |
+|---|---|---|
+| `id` | Backend | Unique obstacle identifier (string) |
+| `key` | Backend | AVL tree key |
+| `left` | Backend | Left child node (or `null`) |
+| `right` | Backend | Right child node (or `null`) |
+| `height` | Backend | Node height in the balanced tree |
+| `children` | Backend (`to_dict`) | Array of child nodes used by D3 hierarchy |
+| `x` | `__formatNodes()` | Obstacle's pixel X coordinate on the road |
+| `y` | `__formatNodes()` | Obstacle's pixel Y coordinate on the road |
+| `type` | `__formatNodes()` | Obstacle type string (e.g. `"Cone"`, `"Rock"`) |
+
+## How tree data arrives
+
+When the backend finishes balancing or traversing the tree it emits the `avl_tree_balanced` Socket.IO event on the `AVLTree` namespace. `TreeService.on_avl_tree_balanced()` receives this event and immediately bridges it into the DOM as a `CustomEvent`:
+
+```javascript
+// src/app/services/Tree.service.js
+on_avl_tree_balanced() {
+    this.socketio.on('avl_tree_balanced', (ev) => {
+        const data = ev.data ?? {};
+        const event = new CustomEvent('avl_tree_balanced', { detail: data });
+        document.dispatchEvent(event);
+    });
+}
+```
+
+`AVLController.listenGetTreeFromBackend()` registers a `document` listener for this custom event and routes the payload to `initDataTree()`:
+
+```javascript
+// src/app/controllers/AVL.controller.js
+listenGetTreeFromBackend() {
+    document.addEventListener('avl_tree_balanced', (event) => {
+        this.initDataTree(event);
+    });
+}
+
+initDataTree(event) {
+    if (event.detail) {
+        this.avl.root = null;
+        this.avl.root = event.detail;
+        this.formatNodes();
+        this.__renderTree(this.avl);
+    }
+}
+```
+
+## Node formatting
+
+Before the tree can be rendered, each node needs its visual properties (`x`, `y`, `type`) filled in from the client-side `Road` model. The backend sends only structural information (IDs, children, height); the coordinates and type are looked up locally.
+
+`AVLController.__formatNodes(current)` walks the tree recursively. For each node it:
+
+1. Calls `road.getObstacleById(current.id)` to find the matching `Obstacle` object in the road's obstacle array.
+2. Calls `obstacle.format_values(true)` to resolve the type string.
+3. Copies `x`, `y`, and `type` from the obstacle onto the current node.
+4. Recurses into `current.children` if they exist.
+
+```javascript
+// src/app/controllers/AVL.controller.js
+__formatNodes(current) {
+    const __obstacle = this.roadController.getRoad().getObstacleById(current.id);
+
+    if (__obstacle) {
+        __obstacle.format_values(true);
+
+        (current.x = __obstacle.x),
+        (current.y = __obstacle.y),
+        (current.type = __obstacle.type);
+
+        if (current.children) {
+            current.children.forEach((child) => {
+                this.__formatNodes(child);
+            });
+        }
+    }
+}
+```
+
+<Warning>
+  If `road.getObstacleById()` returns `null` for a node (for example, after a reload where the front-end road state was reset but the backend still has obstacles), that node will have no `x`, `y`, or `type` and will be skipped silently. This is why `HomeController` emits `reset_avl` on startup — to avoid orphaned nodes.
+</Warning>
+
+## D3.js rendering
+
+`AVLController.__render(data)` is the sole rendering function. It clears the existing SVG content, builds a D3 hierarchy, and draws three layers: links (paths), node circles, and node decorations (image + text label).
+
+### Dynamic sizing
+
+The SVG dimensions grow with the number of nodes to prevent overlapping. The minimum dimensions are 800 × 600 pixels:
+
+```javascript
+const cantidadNodos   = raizJerarquia.descendants().length;
+const anchoDinamico   = Math.max(800, cantidadNodos * 60);
+const altoDinamico    = Math.max(600, cantidadNodos * 2);
+
+this.__elementoSVG.attr('width',  anchoDinamico);
+this.__elementoSVG.attr('height', altoDinamico);
+```
+
+### Tree layout
+
+D3's `tree()` layout calculates node positions. The `separation` callback gives sibling nodes a tighter gap (`1.4`) than nodes that share only a common ancestor (`2.2`), avoiding collisions across subtrees:
+
+```javascript
+const treeDesign = d3
+    .tree()
+    .size([anchoDinamico - 160, altoDinamico - 160])
+    .separation((a, b) => (a.parent === b.parent ? 1.4 : 2.2));
+
+treeDesign(raizJerarquia);
+```
+
+### Link drawing
+
+Edges between parent and child nodes are drawn as smooth vertical curves using `d3.linkVertical()`:
+
+```javascript
+this.__grupoPrincipalSVG
+    .selectAll('.link')
+    .data(raizJerarquia.links())
+    .join('path')
+    .attr('class', 'link')
+    .attr('d', d3.linkVertical()
+        .x((nodo) => nodo.x)
+        .y((nodo) => nodo.y)
+    );
+```
+
+### Node decoration
+
+Each node group receives three child elements:
+
+1. **Circle** – a 25-pixel-radius `<circle>` whose `id` is `_<obstacle-id>` (prefixed with `_` for valid CSS selector use).
+2. **Image** – an SVG `<image>` that loads the obstacle's icon from `./app/assets/img/svg/<type-lowercase>.svg`.
+3. **Text** – a `<text>` label showing the obstacle's road coordinates as `(x, y)`.
+
+```javascript
+nodosVisuales.append('circle')
+    .attr('r', 25)
+    .attr('id', (node) => `_${node.data.id}`);
+
+nodosVisuales.append('image')
+    .attr('xlink:href', (node) =>
+        `./app/assets/img/svg/${node.data.type.toLowerCase()}.svg`);
+
+nodosVisuales.append('text')
+    .text((nodo) => `(${nodo.data.x}, ${nodo.data.y})`);
+```
+
+<Tip>
+  The `id="_<obstacle-id>"` on each circle is not decorative — `WatchRoadsController` uses `document.querySelector('#_' + obs.id)` to find circle elements and add a `current` CSS class during tree traversal animations.
+</Tip>
+
+## Full rendering flow summary
+
+```
+Backend emits "avl_tree_balanced"
+    │
+    ▼
+TreeService.on_avl_tree_balanced()
+    → dispatches CustomEvent('avl_tree_balanced', { detail: treeRoot })
+    │
+    ▼
+AVLController.listenGetTreeFromBackend()
+    → calls initDataTree(event)
+    │
+    ▼
+AVLController.initDataTree()
+    → sets avl.root = event.detail
+    → calls formatNodes()
+    │
+    ▼
+AVLController.__formatNodes(root)  [recursive]
+    → enriches each node with x, y, type from Road model
+    │
+    ▼
+AVLController.__renderTree(avl)
+    → AVLController.__render(avl.root)
+    → D3 hierarchy → tree layout → SVG paths + circles + images + text
+```

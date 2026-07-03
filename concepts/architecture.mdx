@@ -1,0 +1,167 @@
+---
+title: "Application Architecture and Module Structure"
+sidebarTitle: "Architecture"
+description: "Understand AVL Tree Car Front's MVC module layout, initialization flow, controller hierarchy, and how the front end connects to the Python backend."
+---
+
+AVL Tree Car Front is a vanilla JavaScript single-page application organized around a lightweight MVC pattern. All source code lives under `src/app/`, which is split into purpose-specific folders. On every page load the application re-initializes its front-end state from scratch, connects to the Python backend over Socket.IO, and hands off tree-management responsibility entirely to the server.
+
+## Module layout
+
+The `src/app/` directory is divided into six folders, each with a single, well-scoped responsibility:
+
+| Folder | Role |
+|---|---|
+| `controllers/` | Orchestrate user interaction, mount HTML fragments, and coordinate between models and services. Each controller owns one "screen" or feature area. |
+| `models/` | Plain ES-module classes that represent domain objects (`AVL`, `Road`, `Obstacle`, `Node`). They hold state and expose methods, but contain no DOM or network logic. |
+| `services/` | Wrap external I/O. `SocketService` owns the Socket.IO connection; `TreeService` extends it with every event the app emits or receives. |
+| `interfaces/` | Declare the shape of each model through base classes (`ObstacleI`, `RoadI`, `NodeI`). Models extend these to enforce a consistent property contract. |
+| `components/` | Small, reusable HTML-rendering functions and UI widgets (menus, the tree renderer, the road game canvas). |
+| `utils/` | Third-party vendored libraries (`bootstrap`, `popper`, `socket-io`) plus project-specific helpers (`carlos-cuesta/`, `own/`). |
+
+<Note>
+  There is no bundler or build step. The browser loads `main.mjs` directly as a native ES module, so every import resolves at runtime via the file system.
+</Note>
+
+## Initialization flow
+
+When the browser fires `DOMContentLoaded`, `main.mjs` calls `App.init()`. The static method works through four synchronous or asynchronous phases before the user can interact with anything:
+
+```javascript
+// src/app/assets/js/main.mjs (simplified)
+document.addEventListener('DOMContentLoaded', () => {
+    App.init();
+});
+
+class App {
+    static async init() {
+        App.#uitlsReferences();   // 1. Attach utilities to window.*
+        App.#buttonsReferences(); // 2. Pre-build button HTML strings
+        await App.#globalVariables(); // 3. Load configs + OBSTACLES_TYPES
+        const homeController = new HomeController();
+        await homeController.init(); // 4. Mount the home screen
+    }
+}
+```
+
+**Phase 1 – Utility references.** `App.#uitlsReferences()` attaches third-party helpers to `window` so every module can access them without explicit imports:
+
+```javascript
+window.Helpers  = Helpers;
+window.icons    = icons;
+window.Popper   = Popper;
+window.Toast    = Toast;
+window.Modal    = Popup;
+window.Customs  = Customs;
+```
+
+**Phase 2 – Button HTML strings.** Pre-built icon+label strings for the four common action buttons are stored globally so modals don't have to re-build them:
+
+```javascript
+window.addButton    = `${icons.plusSquare}&nbsp;&nbsp;<span>Add</span>`;
+window.deleteButton = `${icons.deleteWhite}<span>Remove</span>`;
+window.acceptButton = `${icons.done1}<span>Accept</span>`;
+window.cancelButton = `${icons.x}<span>Cancel</span>`;
+```
+
+**Phase 3 – Global variables.** `App.#globalVariables()` makes two async calls:
+
+1. Loads `configs.json` and stores it as `window.configs`. Sets `window.URLAPI` from `configs.urlAPI`.
+2. Fetches `GET ${URLAPI}/data/json/obstacles_types.json` and stores the `data` array as `window.OBSTACLES_TYPES`. This list powers the `Obstacle.format_values()` lookup used throughout the app.
+
+```javascript
+window.configs         = await Helpers.fetchJSON('./app/assets/json/configs.json');
+window.URLAPI          = configs.urlAPI;
+window.SOUND_ON        = true;
+
+const response         = await Helpers.fetchJSON(`${URLAPI}/data/json/obstacles_types.json`);
+window.OBSTACLES_TYPES = response.data;
+```
+
+**Phase 4 – Home controller.** A `HomeController` instance is created and its `init()` method is awaited. This mounts the main navigation HTML inside `<main>` and registers all button listeners.
+
+### Global `window` variables summary
+
+| Variable | Type | Description |
+|---|---|---|
+| `window.configs` | `Object` | Parsed `configs.json` (contains `urlAPI`, `urlSOCKET`) |
+| `window.URLAPI` | `String` | Base REST API URL, e.g. `http://127.0.0.1:4500` |
+| `window.OBSTACLES_TYPES` | `Array` | List of `{id, type}` obstacle-type descriptors |
+| `window.SOUND_ON` | `Boolean` | Global sound toggle flag |
+| `window.Helpers` | `Object` | Utility functions (`fetchJSON`, `fetchText`, `okForm`, …) |
+| `window.icons` | `Object` | SVG icon strings keyed by name |
+| `window.Toast` | `Class` | Toast notification helper |
+| `window.Modal` | `Class` | Dialog/popup builder (`Popup`) |
+| `window.Customs` | `Module` | Shared CSS class strings and toast shortcuts |
+| `window.Popper` | `Module` | Popper.js (positioning engine for Bootstrap) |
+
+## Controller hierarchy
+
+`HomeController` is the root of the controller tree. It is instantiated once by `App.init()` and never destroyed. All other controllers are created lazily — only when the user clicks the corresponding button — and cached in `this.controllers`:
+
+```
+HomeController
+├── TreeService          (created immediately in init())
+├── RoadController       (created on first "Create Road" or "Load JSON" click)
+├── AVLController        (created on first "Insert Obstacles" or "Load JSON" click)
+│   └── TreeService      (own instance for AVL-specific emit/on calls)
+├── ObstaclesController  (created on first "Insert Obstacles" click)
+├── LoadJSONController   (created on first "Load JSON" click)
+└── WatchRoadsController (created on first "Watch Roads" click)
+```
+
+`HomeController` guards each instantiation with an `if (!this.controllers.X)` check to prevent duplicate instances and avoid wiping existing road/tree state:
+
+```javascript
+// Home.controller.js — lazy RoadController creation
+this.elements.btnCreateRoad.addEventListener('click', async (ev) => {
+    if (!this.controllers.Road) {
+        this.controllers.Road = new RoadController(this.treeService);
+    }
+    await this.controllers.Road.init();
+    this.disableEnable(['btnInsertObstacles'], true);
+});
+```
+
+`RoadController` and `AVLController` receive a reference to the shared `TreeService` instance so all socket communication funnels through the same connection.
+
+<Tip>
+  `HomeController.disableEnable()` is the single place that enables or disables toolbar buttons. Buttons other than **Create Road** and **Load JSON** start disabled and are unlocked progressively as the user sets up prerequisites.
+</Tip>
+
+## SPA navigation
+
+There are no URL changes or `<a href>` navigations. Every "screen" is swapped by replacing or prepending HTML inside `<main>`:
+
+- `HomeController.#loadHML()` sets `this.containerMain.innerHTML = html` to mount the toolbar.
+- `AVLController.__loadHTML()` calls `main.insertAdjacentHTML('afterbegin', html)` to prepend the SVG container, checking first that `#tree-render` does not already exist.
+- `WatchRoadsController.__cleanMain()` sets `this.main.innerHTML = html` to replace the entire main area with the traversal view.
+
+Because DOM elements are recreated on each navigation, `WatchRoadsController.__callRenderTree()` re-initializes the `AVLController` (calling `avlCtrl.init()`) to re-attach the `avl_tree_balanced` listener and re-query the SVG containers.
+
+## State reset
+
+Every browser reload resets all front-end state to zero: the `Road`, `AVL`, and `Obstacle` model instances are garbage-collected and re-created fresh. The Python backend, however, retains its in-memory AVL tree across reloads.
+
+To keep them in sync, `HomeController.init()` immediately calls `this.treeService.emit_reset_avl()` before loading the home HTML. This tells the backend to discard its current tree so that the front end and back end both start from an empty state:
+
+```javascript
+// Home.controller.js
+async init(isReload = false) {
+    if (!this.controllers) {
+        this.controllers = {};
+        this.treeService = new TreeService();
+        // Reset backend AVL data
+        this.__emitResetTree();
+    }
+    // ...
+}
+
+__emitResetTree() {
+    this.treeService.emit_reset_avl();
+}
+```
+
+<Warning>
+  The reset is emitted unconditionally on the first `init()` call. If you open multiple browser tabs pointing at the same backend, each tab will reset the shared tree when it loads.
+</Warning>

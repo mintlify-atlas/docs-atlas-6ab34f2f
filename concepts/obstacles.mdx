@@ -1,0 +1,207 @@
+---
+title: "Obstacles: Types, Coordinates, and Lifecycle"
+sidebarTitle: "Obstacles"
+description: "Explore how obstacles are defined, validated, added to the road, sent to the backend AVL tree, and removed — including all ten obstacle types."
+---
+
+Obstacles are the core data unit of AVL Tree Car Front. Each one represents a physical road hazard that is placed at a specific pixel coordinate on the virtual road, sent to the Python backend to be inserted into the AVL tree, and then rendered as a node in the D3.js SVG diagram. This page explains the obstacle data model, all ten supported types, coordinate rules, and the complete add/remove lifecycle.
+
+## Obstacle model
+
+`Obstacle` extends `ObstacleI`, which declares the four base properties shared by every obstacle object:
+
+```javascript
+// src/app/interfaces/Obstacle.interface.mjs
+export default class ObstacleI {
+    /**@type {String} */ id;   // Unique identifier assigned by the backend
+    /**@type {Number} */ x;    // Pixel distance from the left edge of the road
+    /**@type {Number} */ y;    // Pixel distance from the top edge of the road
+    /**@type {String} */ type; // Obstacle type name, e.g. "Cone"
+}
+```
+
+### Constructor
+
+`new Obstacle({ id, x, y, type, is_type_str })` accepts a single configuration object. The `is_type_str` flag controls how `type` is resolved:
+
+```javascript
+// src/app/models/Obstacle.model.mjs
+export default class Obstacle extends ObstacleI {
+    constructor(data = { id: '', x: -1, y: -1, type: '', is_type_str: false }) {
+        super();
+        this.id   = data.id;
+        this.x    = data.x;
+        this.y    = data.y;
+        this.type = data.type;
+
+        this.format_values(data.is_type_str);
+    }
+
+    format_values(is_type_str = false) {
+        const __type = OBSTACLES_TYPES.find((obs) => {
+            if (is_type_str === true) {
+                return obs.type === this.type;   // String comparison
+            } else {
+                return obs.id === this.type;     // Numeric ID comparison
+            }
+        });
+
+        this.type = __type.type; // Always resolves to a display string like "Cone"
+    }
+}
+```
+
+| `is_type_str` | `type` input | Lookup strategy |
+|---|---|---|
+| `false` (default) | Numeric ID from the form `<select>` | Finds `OBSTACLES_TYPES` entry where `obs.id === this.type` |
+| `true` | String name, e.g. `"Cone"` | Finds `OBSTACLES_TYPES` entry where `obs.type === this.type` |
+
+`is_type_str: true` is used when loading obstacles from a JSON file via `LoadJSONController`, where types are already stored as human-readable strings.
+
+<Note>
+  `format_values()` is also called by `AVLController.__formatNodes()` with `true` when enriching tree nodes before rendering. At that point `this.type` is already a string, so the string-comparison path ensures a consistent resolved value.
+</Note>
+
+## Obstacle types
+
+The full list of obstacle types is fetched at startup from `GET ${URLAPI}/data/json/obstacles_types.json`. Each type has a numeric `id` and a display string `type`. The corresponding SVG icon is loaded from `src/app/assets/img/svg/<type-lowercase>.svg`.
+
+| Numeric ID | Type name | Icon file |
+|---|---|---|
+| 1 | Cone | `cone.svg` |
+| 2 | Rock | `rock.svg` |
+| 3 | Tree | `tree.svg` |
+| 4 | Tire | `tire.svg` |
+| 5 | Nail | `nail.svg` |
+| 6 | Trunk | `trunk.svg` |
+| 7 | Person | `person.svg` |
+| 8 | Car | `car.svg` |
+| 9 | Bicycle | `bicycle.svg` |
+| 10 | Chair | `chair.svg` |
+
+Icons are used in two places: the obstacle type preview inside the "Add Obstacles" modal (updated live as the user changes the `<select>`) and as `<image>` elements inside each D3 node circle in the tree SVG.
+
+## Coordinate system
+
+Every obstacle is positioned on a 2D road canvas. The coordinate ranges are derived at runtime from the road dimensions the user entered when creating the road:
+
+| Axis | Minimum | Maximum | Source |
+|---|---|---|---|
+| **X** | `Math.floor(roadWidth * 0.05)` | `roadWidth − 15` | Road width entered by user (minimum 500 px) |
+| **Y** | `5` | `road.getHeight()` | Computed CSS height of `#road-container` |
+
+`ObstaclesController.#addLimitsAttributtes()` reads these values from the `Road` model and sets `min`/`max` HTML attributes on the `#obstacle-x` and `#obstacle-y` inputs, as well as updating the informational text displayed to the user:
+
+```javascript
+const __maxX = __road.getWidth() - 15;
+const __minX = parseInt(__maxX * 0.05);
+const __maxY = __road.getHeight();
+const __minY = 5;
+
+__inputX.setAttribute('min', `${__minX}`);
+__inputX.setAttribute('max', `${__maxX}`);
+__inputY.setAttribute('min', `${__minY}`);
+__inputY.setAttribute('max', `${__maxY}`);
+```
+
+<Warning>
+  If the user attempts to submit the form with out-of-range values, `ObstaclesController.#validateMinAndMax()` generates an inline error message and blocks the request. The road **must** be created before opening the "Add Obstacles" dialog, otherwise coordinate limits cannot be calculated.
+</Warning>
+
+## Adding an obstacle — full lifecycle
+
+Adding an obstacle involves the form, a REST call, a Socket.IO response, and client-side state update.
+
+### 1. Form submission
+
+`ObstaclesController.#addAction()` is triggered when the user clicks the **Add** button in the modal. It:
+
+1. Validates the form with `Helpers.okForm('#form-obstacles')`.
+2. Reads `x` (float), `y` (float), and `type` (numeric ID from the `<select>`) with `#getFormData()`.
+3. Instantiates `new Obstacle({ x, y, type, is_type_str: false })`.
+
+### 2. REST call to the backend
+
+`AVLController.send_roads_to_backend(obstacleObj)` sends the obstacle to the backend:
+
+```javascript
+const req = await Helpers.fetchJSON(`${URLAPI}/avl/node/add`, {
+    method: 'POST',
+    body: data,
+});
+```
+
+The backend inserts the obstacle into its AVL tree and returns a response with `status: 200` and `data: <newObstacleId>` on success.
+
+### 3. Client-side state update
+
+If the response status is `200`, three things happen immediately:
+
+```javascript
+// ObstaclesController.js (inside #addAction)
+this.AVLController.getTree();        // 1. Request fresh tree from backend
+this.obstacleObj.id = req.data;      // 2. Assign the backend-issued ID
+road.setObstacle(this.obstacleObj);  // 3. Push obstacle into Road model
+```
+
+`road.setObstacle()` appends the fully-constructed `Obstacle` to `this.obstacles`:
+
+```javascript
+// Road.model.mjs
+setObstacle(obstacle) {
+    this.obstacles.push(obstacle);
+}
+```
+
+Once the obstacle is in the `Road` model, `AVLController.__formatNodes()` can find it by ID when the server responds with the updated balanced tree.
+
+### 4. Tree re-render
+
+`AVLController.getTree()` emits `get_tree_avl` over Socket.IO. The backend responds with `avl_tree_balanced`, which triggers the full [rendering pipeline](/concepts/avl-tree#full-rendering-flow-summary).
+
+## Removing an obstacle
+
+Removal is initiated from the `WatchRoadsController` delete flow (via `DeleteObstacle`). On the model side, `road.removeObstacle({ x, y })` locates the obstacle by its coordinates using `findIndex` and splices it from the array:
+
+```javascript
+// Road.model.mjs
+removeObstacle(coordinates) {
+    const __index = this.obstacles.findIndex(
+        (obs) => obs.x === coordinates.x && obs.y === coordinates.y
+    );
+
+    if (__index >= 0) {
+        this.obstacles.splice(__index, 1);
+    }
+}
+```
+
+On the network side, `AVLController.removeObstacleFromTree()` emits `remove_obstacle` over Socket.IO:
+
+```javascript
+// AVL.controller.js
+removeObstacleFromTree() {
+    this.service.emit_remove_obstacle();
+}
+```
+
+After removal the backend rebalances the tree and the front end requests an updated tree snapshot to re-render the SVG.
+
+## Loading obstacles from JSON
+
+`LoadJSONController` offers an alternative entry point that bypasses the form and adds many obstacles at once. The user pastes or uploads a JSON file, and the controller:
+
+1. Emits `reset_avl` to clear the backend tree.
+2. POSTs the JSON to `POST ${URLAPI}/avl/add/configs`.
+3. On success, iterates the response's obstacle-ID array and creates an `Obstacle` for each entry with `is_type_str: true` (since types in the JSON are already strings).
+4. Calls `road.setObstacles(obstaclesList)` to replace the road's obstacle array in one operation.
+5. Emits `get_tree_avl` to trigger a full tree re-render.
+
+```javascript
+// LoadJson.controller.js (inside #setObstaclesFromTextArea)
+const data = { id, ...obs, is_type_str: true };
+const __obstacle = new Obstacle(data);
+obstaclesList.push(__obstacle);
+// ...
+this.road.setObstacles(obstaclesList);
+```

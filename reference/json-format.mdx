@@ -1,0 +1,183 @@
+---
+title: "JSON Configuration File Format for Bulk Import"
+sidebarTitle: "JSON Format"
+description: "Complete specification for the JSON file format used by AVL Tree Car Front's Load JSON feature, including obstacle types, coordinate rules, and a full example."
+---
+
+The **Load JSON** feature lets you populate a road with many obstacles in a single operation rather than adding them one at a time through the Add Obstacles form. When you click the **Load JSON** button, the application opens a modal that accepts a `.json` file, displays its contents in a preview textarea, and sends the parsed object to the backend when you confirm. Understanding the exact file structure is essential for creating files that the backend will accept without errors.
+
+---
+
+## Purpose
+
+A JSON import file describes two things: optional road configuration (primarily the total road width) and the list of obstacles to place on that road. The application reads the file client-side with `FileReader`, parses it as JSON, resets the backend AVL tree, and then POSTs the entire object to `POST /avl/add/configs`. On success the backend returns an array of assigned obstacle IDs that the client uses to build its in-memory `Obstacle` instances.
+
+---
+
+## Top-Level Structure
+
+The JSON object must have exactly two top-level keys.
+
+<ParamField path="configs" type="object" required>
+  Road-level configuration settings applied before the obstacles are inserted.
+</ParamField>
+
+<ParamField path="obstacles" type="array" required>
+  An ordered array of obstacle objects. Each element becomes one node in the backend AVL tree.
+</ParamField>
+
+---
+
+## `configs` Object
+
+<ParamField path="configs.total_distance" type="number" optional>
+  Sets the road width on the client side after a successful import by calling `road.setWidth(total_distance)`. Should be equal to or greater than the largest `x` coordinate in your `obstacles` array. The minimum recommended value is `500` (the default road width). If omitted, the road width remains at whatever was set when the road was created.
+</ParamField>
+
+---
+
+## `obstacles` Array
+
+Each element of the `obstacles` array is an object describing a single road obstacle.
+
+<ParamField path="obstacles[].x" type="number" required>
+  Horizontal pixel position of the obstacle on the road. Valid range: between **5 % of `total_distance`** and **`total_distance` − 15**. For a `total_distance` of `1500`, the valid X range is approximately `75` to `1485`.
+</ParamField>
+
+<ParamField path="obstacles[].y" type="number" required>
+  Vertical pixel position of the obstacle on the road. Valid range: **5** (minimum) to the road height (default `300`).
+</ParamField>
+
+<ParamField path="obstacles[].type" type="string" required>
+  The obstacle type name as a lowercase string. The client uppercases the first character before sending to the backend (e.g. `"cone"` becomes `"Cone"`). See the [Valid Type Values](#valid-type-values) table below for all accepted strings.
+</ParamField>
+
+<Warning>
+  The `x` and `y` coordinate limits are enforced by the same rules used in the manual Add Obstacles form. Obstacles with coordinates outside the valid range may be rejected by the backend with a non-200 status.
+</Warning>
+
+---
+
+## Type Normalization
+
+Before sending the JSON payload to the backend, `LoadJSONController` iterates the `obstacles` array and transforms each `type` string:
+
+```javascript
+obs.type = `${obs.type.slice(0, 1).toUpperCase()}${obs.type.slice(1, obs.type.length)}`;
+```
+
+This means only the first character is uppercased — the rest of the string is preserved as written. Both `"cone"` and `"Cone"` are therefore valid input values; the resulting backend value will always be `"Cone"`.
+
+---
+
+## Valid Type Values
+
+| JSON `type` value | Normalized (sent to backend) |
+|---|---|
+| `cone` | `Cone` |
+| `rock` | `Rock` |
+| `tree` | `Tree` |
+| `tire` | `Tire` |
+| `nail` | `Nail` |
+| `trunk` | `Trunk` |
+| `person` | `Person` |
+| `car` | `Car` |
+| `bicycle` | `Bicycle` |
+| `chair` | `Chair` |
+
+<Tip>
+  Type matching in the `Obstacle` model uses strict equality against the canonical strings above. Using an unrecognized type value will cause `format_values()` to fail when building the client-side `Obstacle` instances after the import.
+</Tip>
+
+---
+
+## Full Example
+
+```json
+{
+  "configs": {
+    "total_distance": 1500
+  },
+  "obstacles": [
+    { "x": 100,  "y": 50, "type": "cone"   },
+    { "x": 250,  "y": 80, "type": "rock"   },
+    { "x": 400,  "y": 60, "type": "tire"   },
+    { "x": 600,  "y": 90, "type": "tree"   },
+    { "x": 800,  "y": 45, "type": "nail"   },
+    { "x": 1000, "y": 70, "type": "trunk"  },
+    { "x": 1200, "y": 55, "type": "person" }
+  ]
+}
+```
+
+---
+
+## API Endpoint
+
+**`POST /avl/add/configs`**
+
+The entire JSON object (including both `configs` and `obstacles`) is sent as the request body.
+
+### Request
+
+```json
+{
+  "configs": { "total_distance": 1500 },
+  "obstacles": [
+    { "x": 100, "y": 50, "type": "cone" }
+  ]
+}
+```
+
+### Response (status 200)
+
+<ResponseField name="status" type="number">
+  HTTP-style status code. `200` indicates all obstacles were successfully inserted into the AVL tree.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable confirmation message displayed in a success toast.
+</ResponseField>
+
+<ResponseField name="data" type="string[]">
+  Array of backend-assigned obstacle IDs. The array length equals the number of objects in the `obstacles` input array and the order is preserved — `data[0]` is the ID for `obstacles[0]`, `data[1]` for `obstacles[1]`, and so on. These IDs are used to construct the client-side `Obstacle` instances and are stored on `this.road`.
+</ResponseField>
+
+```json
+{
+  "status": 200,
+  "message": "Obstacles added successfully",
+  "data": ["abc-001", "abc-002", "abc-003", "abc-004", "abc-005", "abc-006", "abc-007"]
+}
+```
+
+---
+
+## Reset Behavior
+
+<Warning>
+  Clicking **Accept** in the Load JSON modal **always resets the backend AVL tree first** by emitting `reset_avl` via `TreeService` before the POST request is sent. Any obstacles you added manually before loading a JSON file will be permanently removed from the backend tree and from the client road model. There is no undo.
+</Warning>
+
+The reset sequence is:
+
+1. `avlCtrl.service.emit_reset_avl()` → backend clears the tree.
+2. `POST /avl/add/configs` → backend inserts all JSON obstacles and returns their IDs.
+3. Client builds `Obstacle` instances and calls `road.setObstacles(obstaclesList)`, replacing the previous obstacles array entirely.
+4. `avlCtrl.getTree()` → backend emits `avl_tree_balanced` → D3.js re-renders the tree.
+
+---
+
+## Notes on Client-Side Processing
+
+After a successful response the controller calls `#setObstaclesFromTextArea(req.data)`, which:
+
+1. Re-parses the textarea content as JSON.
+2. Iterates `json.obstacles` in order, pairing each entry with its assigned ID from `req.data`.
+3. Uppercases the first character of each `type` string.
+4. Constructs a `new Obstacle({ id, x, y, type, is_type_str: true })` for each entry. The `is_type_str: true` flag tells `Obstacle.format_values()` to match the type by string name rather than numeric ID.
+5. Calls `road.setObstacles(obstaclesList)` to replace the road's obstacle array with the newly built list.
+
+<Note>
+  The `id` field in each constructed `Obstacle` comes from the backend response, not from the JSON file. Do not include an `id` key in your obstacle objects — it will be ignored.
+</Note>

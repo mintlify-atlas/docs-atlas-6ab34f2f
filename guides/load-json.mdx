@@ -1,0 +1,128 @@
+---
+title: "Bulk-Load Obstacles from a JSON File"
+sidebarTitle: "Load JSON"
+description: "Use AVL Tree Car Front's Load JSON feature to import a set of obstacles from a structured JSON file and sync them to the backend AVL tree in one operation."
+---
+
+Adding obstacles one by one through the Add Obstacles dialog is useful for small experiments, but when you want to populate the AVL tree with a predefined set of road obstacles — for example, a saved test scenario — the **Load JSON** feature lets you do it in a single operation. You prepare a `.json` file that describes the road width and every obstacle, then point the dialog at that file. The controller validates the payload, POSTs it to the backend, syncs the returned IDs to the client-side road model, and redraws the D3.js tree automatically.
+
+## Prerequisites
+
+No road needs to exist before using **Load JSON**. The button (`#btn-load-json`) is always enabled on the home screen. The controller creates `RoadController` and `AVLController` instances internally if they do not already exist.
+
+## JSON file format
+
+Your `.json` file must follow this exact structure:
+
+```json
+{
+  "configs": {
+    "total_distance": 1200
+  },
+  "obstacles": [
+    { "x": 100, "y": 50, "type": "cone" },
+    { "x": 300, "y": 80, "type": "rock" },
+    { "x": 600, "y": 120, "type": "tire" }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `configs.total_distance` | `number` | Sets the road width client-side via `road.setWidth()`. Corresponds to the maximum X coordinate for the obstacle space. |
+| `obstacles` | `array` | List of obstacle objects to insert into the AVL tree. |
+| `obstacles[].x` | `number` | Horizontal pixel position of the obstacle. |
+| `obstacles[].y` | `number` | Vertical pixel position of the obstacle. |
+| `obstacles[].type` | `string` | Obstacle type name (see the [obstacle types table](#obstacle-types)). |
+
+<Note>
+  Obstacle type strings are **case-insensitive**. The controller normalizes the first character to uppercase before creating each `Obstacle` model instance (e.g. `"cone"` becomes `"Cone"`, `"ROCK"` becomes `"Rock"`). All other characters are preserved as-written.
+</Note>
+
+### Obstacle types
+
+The following type strings are accepted. Any capitalisation variant is valid.
+
+| Type string | Description |
+|-------------|-------------|
+| `cone` | Traffic cone |
+| `rock` | Rock |
+| `tree` | Tree |
+| `tire` | Tire |
+| `nail` | Nail |
+| `trunk` | Trunk |
+| `person` | Person |
+| `car` | Car |
+| `bicycle` | Bicycle |
+| `chair` | Chair |
+
+## Steps
+
+<Steps>
+  <Step title="Click Load JSON on the home screen">
+    Click the **Load JSON** button (`#btn-load-json`). `HomeController` lazily initialises `RoadController`, `AVLController`, and `LoadJSONController` if they are not yet present, then calls `LoadJSONController.init()`. A modal dialog titled **Load Obstacles From JSON** appears.
+  </Step>
+
+  <Step title="Select your JSON file">
+    Click the **Load JSON** file input and choose your `.json` file from disk. The browser reads the file using the `FileReader` API and populates the read-only textarea (`#load-json-text`) with the raw file contents. You can review the JSON in the textarea before proceeding.
+
+    ```js
+    // LoadJSONController — file read handler
+    reader.onload = (e) => {
+        this.#elements.textarea.textContent = e.target.result;
+    };
+    ```
+  </Step>
+
+  <Step title="Review the preview">
+    The textarea shows the full JSON content. Verify that the obstacle list and `total_distance` look correct. The textarea is populated automatically and is not editable through the UI — it reflects exactly what will be sent to the backend.
+  </Step>
+
+  <Step title="Click Accept to send">
+    Click **Accept**. `LoadJSONController.#sendJSON()` executes the following sequence:
+
+    1. **Resets the backend tree** — `emit_reset_avl()` is called via Socket.IO before anything is sent, so the backend starts from an empty tree.
+    2. **Parses the textarea content** — `JSON.parse()` converts the raw string into a JavaScript object.
+    3. **POSTs to `/avl/add/configs`** — the full JSON object is sent as the request body.
+
+    ```http
+    POST /avl/add/configs
+    Content-Type: application/json
+
+    {
+      "configs": { "total_distance": 1200 },
+      "obstacles": [
+        { "x": 100, "y": 50, "type": "cone" },
+        { "x": 300, "y": 80, "type": "rock" },
+        { "x": 600, "y": 120, "type": "tire" }
+      ]
+    }
+    ```
+  </Step>
+
+  <Step title="Backend response and client-side sync">
+    On a `status 200` response the controller:
+
+    1. Shows a success toast with the backend's response message.
+    2. Calls `road.setWidth(data.configs.total_distance)` to apply the road width client-side.
+    3. Maps each returned obstacle ID (from `req.data`, an array in insertion order) to the corresponding obstacle entry in the JSON, uppercases the type's first character, and constructs an `Obstacle` model instance for each.
+    4. Stores the full list with `road.setObstacles(obstaclesList)`.
+    5. Calls `avlCtrl.getTree()` which emits `get_tree_avl` to the backend and triggers a full D3.js tree redraw when the `avl_tree_balanced` Socket.IO event arrives.
+    6. Enables both the **Insert Obstacles** (`#btn-insert-obstacles`) and **Remove & Watch Roads** (`#btn-watch-roads`) buttons.
+    7. Closes the modal.
+
+    If the backend returns any status other than `200`, a warning toast is shown and the modal stays open.
+  </Step>
+</Steps>
+
+## Error handling
+
+| Condition | Behaviour |
+|-----------|-----------|
+| Textarea is empty or has fewer than 50 characters | Toast: *No data to send!* — request is not made |
+| `JSON.parse()` fails | An exception is caught and logged; the modal stays open |
+| Backend returns non-200 status | Warning toast with the backend's message; no client state is changed |
+
+<Warning>
+  Clicking **Accept** always emits `reset_avl` to the backend **before** sending the new configuration. Any obstacles that were previously in the backend AVL tree are permanently cleared, even if the subsequent POST fails on the client side.
+</Warning>

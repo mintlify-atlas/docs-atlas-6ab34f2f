@@ -1,0 +1,387 @@
+---
+title: "Data Models: Road, Obstacle, AVL, Car, and Node"
+sidebarTitle: "Models"
+description: "Full reference for all data model classes in AVL Tree Car Front — Road, Obstacle, AVL, Car, Node, and RectCollider — with properties and method signatures."
+---
+
+The data model layer defines the client-side representations of every entity the application manages. Each class is a plain JavaScript module (`*.model.mjs`) that may extend an interface class (`*.interface.mjs`) which declares typed properties. All tree logic — insertion, deletion, balancing — is executed on the Python backend; the frontend models are pure data containers used for rendering and state management.
+
+---
+
+## Road
+
+**File:** `src/app/models/Road.model.mjs`  
+**Extends:** `RoadI` (`interfaces/Road.interface.mjs`)
+
+`Road` is the central client-side data container for a single road segment. It stores the road's pixel dimensions and holds the full list of `Obstacle` objects that have been placed on it. Every controller that needs to know where obstacles are or how wide the road is queries through a `Road` instance.
+
+### Constructor
+
+```javascript
+constructor(sizesObj?)
+```
+
+<ParamField path="sizesObj" type="object" optional>
+  An optional plain object with `top`, `width`, and `height` keys. When provided the constructor immediately calls `setSizes(sizesObj)` to apply the values; when omitted the road defaults to `top=0`, `width=500`, and `height=300`.
+</ParamField>
+
+### Properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `top` | `number` | `0` | The vertical offset (Y position) of the road strip on the canvas. |
+| `width` | `number` | `500` | The total horizontal length of the road in pixels. |
+| `height` | `number` | `300` | The vertical height of the road strip in pixels. |
+| `obstacles` | `Obstacle[]` | `[]` | The ordered list of obstacle objects currently on this road. |
+
+### Methods
+
+#### `setSizes(sizesObj)`
+
+Bulk-sets `top`, `width`, and `height` from a plain object.
+
+<ParamField path="sizesObj" type="object" required>
+  Must contain numeric keys `top`, `width`, and `height`. Called automatically in the constructor when a `sizesObj` argument is passed.
+</ParamField>
+
+---
+
+#### `setObstacle(obstacle)`
+
+Appends a single obstacle to the `obstacles` array.
+
+<ParamField path="obstacle" type="Obstacle" required>
+  A fully constructed `Obstacle` instance. The obstacle is pushed to the end of the array; no duplicate check is performed.
+</ParamField>
+
+---
+
+#### `setObstacles(obstacles)`
+
+Replaces the entire `obstacles` array at once.
+
+<ParamField path="obstacles" type="Obstacle[]" required>
+  An array of `Obstacle` instances. Used after a bulk JSON import to set all obstacles in a single operation.
+</ParamField>
+
+---
+
+#### `getHeight()`
+
+<ResponseField name="return" type="number">
+  The current road height in pixels.
+</ResponseField>
+
+---
+
+#### `getWidth()`
+
+<ResponseField name="return" type="number">
+  The current road width in pixels.
+</ResponseField>
+
+---
+
+#### `getObstacles()`
+
+<ResponseField name="return" type="Obstacle[]">
+  The full array of obstacle objects currently tracked on this road.
+</ResponseField>
+
+---
+
+#### `setWidth(w)`
+
+Updates the road width. Called by `LoadJSONController` after a successful JSON import when `configs.total_distance` is present.
+
+<ParamField path="w" type="number" required>
+  New road width in pixels.
+</ParamField>
+
+---
+
+#### `removeObstacle(coordinates)`
+
+Finds the first obstacle whose `x` **and** `y` both match the supplied coordinates and removes it from the array via `splice`.
+
+<ParamField path="coordinates" type="object" required>
+  Plain object with numeric keys `x` and `y`. The lookup uses a strict equality check on both axes simultaneously.
+</ParamField>
+
+<Note>
+  If no obstacle matches both coordinates the array is left unchanged. Only the first matching index is removed if duplicates exist.
+</Note>
+
+---
+
+#### `getObstacleById(id)`
+
+Searches the `obstacles` array for an obstacle whose `id` property matches the supplied string.
+
+<ParamField path="id" type="string" required>
+  The unique obstacle identifier assigned by the backend.
+</ParamField>
+
+<ResponseField name="return" type="Obstacle | null">
+  The matching `Obstacle` instance, or `null` if no match is found.
+</ResponseField>
+
+<Warning>
+  The source code marks this method with a `FIXME` comment noting that it may not reliably locate obstacles in all situations. Do not rely on it as the sole lookup mechanism in production flows.
+</Warning>
+
+---
+
+## Obstacle
+
+**File:** `src/app/models/Obstacle.model.mjs`  
+**Extends:** `ObstacleI` (`interfaces/Obstacle.interface.mjs`)
+
+`Obstacle` represents a single road hazard. The constructor accepts a raw data object from a form or a JSON file and immediately normalizes the `type` field to a human-readable string using the global `OBSTACLES_TYPES` lookup table that is injected at runtime.
+
+### Constructor
+
+```javascript
+constructor(data?)
+```
+
+<ParamField path="data" type="object" optional>
+  Raw obstacle data. Defaults to `{ id: '', x: -1, y: -1, type: '', is_type_str: false }`.
+
+  <Expandable title="data fields">
+    <ParamField path="data.id" type="string">
+      Unique identifier. May be an empty string until the backend assigns one.
+    </ParamField>
+    <ParamField path="data.x" type="number">
+      Horizontal pixel coordinate on the road.
+    </ParamField>
+    <ParamField path="data.y" type="number">
+      Vertical pixel coordinate on the road.
+    </ParamField>
+    <ParamField path="data.type" type="string | number">
+      Either a numeric type ID (when `is_type_str` is `false`) or a string type name such as `"Cone"` (when `is_type_str` is `true`).
+    </ParamField>
+    <ParamField path="data.is_type_str" type="boolean">
+      Controls how `format_values` interprets the `type` field. Pass `true` when `type` is already a string name (e.g. from a JSON import); pass `false` when `type` is a numeric ID coming from a select element.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+After setting the raw properties the constructor always calls `this.format_values(data.is_type_str)` to normalize the `type` to a canonical string.
+
+### Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `id` | `string` | The backend-assigned unique identifier. Empty until confirmed by the server. |
+| `x` | `number` | Horizontal pixel position on the road. |
+| `y` | `number` | Vertical pixel position on the road. |
+| `type` | `string` | Normalized obstacle type name (e.g. `"Cone"`, `"Rock"`) after `format_values` runs. |
+
+### Methods
+
+#### `format_values(is_type_str)`
+
+Normalizes the raw `type` value to a canonical type name by searching the global `OBSTACLES_TYPES` array.
+
+<ParamField path="is_type_str" type="boolean" required>
+  When `true`, the method matches `obs.type === this.type` (string comparison). When `false`, it matches `obs.id === this.type` (numeric ID comparison). After the lookup `this.type` is overwritten with the matched `.type` string from the global table.
+</ParamField>
+
+<Note>
+  `OBSTACLES_TYPES` is a globally scoped array injected by the application bootstrap. It contains objects of the form `{ id: number, type: string }` covering all ten valid obstacle categories.
+</Note>
+
+---
+
+## AVL
+
+**File:** `src/app/models/AVL.model.mjs`
+
+`AVL` is a lightweight client-side container for the balanced tree data received from the backend. It does **not** implement any tree algorithms — insertion, deletion, and rebalancing are all handled server-side in Python. The frontend uses this class purely to hold the current root node and to pass the tree structure to D3.js for rendering.
+
+### Constructor
+
+```javascript
+constructor()
+```
+
+The constructor sets `root` to `null`. No arguments are required or accepted.
+
+### Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `root` | `Node \| null` | The root node of the tree as received from the backend. `null` when the tree is empty or has not yet been fetched. |
+| `insert` | `Function` | Declared as a typed stub; not implemented on the client. |
+| `delete` | `Function` | Declared as a typed stub; not implemented on the client. |
+| `to_dict` | `Function` | Declared as a typed stub; not implemented on the client. |
+
+<Note>
+  `insert`, `delete`, and `to_dict` are type-annotation stubs only. All actual tree mutations are sent to the backend via Socket.IO and the resulting balanced tree is received back through the `avl_tree_balanced` event.
+</Note>
+
+---
+
+## Node
+
+**File:** `src/app/models/Node.model.mjs`  
+**Extends:** `NodeI` (`interfaces/Node.interface.mjs`)
+
+`Node` is a minimal extension of the `NodeI` interface. The class body is empty — its shape is defined entirely by `NodeI` and then enriched at runtime by `AVLController.formatNodes()`, which attaches obstacle coordinates and type to each node after the tree arrives from the backend.
+
+### Base Properties (from `NodeI`)
+
+| Property | Type | Description |
+|---|---|---|
+| `key` | `string` | The node key as assigned by the backend AVL tree. |
+| `left` | `Node` | Reference to the left child node, or `null`. |
+| `right` | `Node` | Reference to the right child node, or `null`. |
+| `height` | `number` | The AVL balance height of this node as reported by the backend. |
+
+### Runtime-Enriched Properties
+
+After `AVLController.__formatNodes()` processes the tree, each node in the hierarchy also carries:
+
+| Property | Type | Description |
+|---|---|---|
+| `id` | `string` | The obstacle's unique backend ID, used as the node key in the SVG. |
+| `x` | `number` | Horizontal pixel position copied from the matching `Obstacle`. |
+| `y` | `number` | Vertical pixel position copied from the matching `Obstacle`. |
+| `type` | `string` | Normalized obstacle type name (e.g. `"Tire"`) used to resolve the correct SVG icon. |
+| `children` | `Node[]` | Array of child nodes in the backend's `tree.to_dict()` format, used to traverse the hierarchy. |
+
+<Note>
+  The backend serializes the tree using `tree.to_dict()`, which structures children as an array rather than explicit `left`/`right` references. The D3.js hierarchy layout consumes this `children` array directly.
+</Note>
+
+---
+
+## Car
+
+**File:** `src/app/models/Car.model.mjs`  
+**Extends:** `CarI` (`interfaces/Car.interface.mjs`)
+
+`Car` models the player vehicle in the road simulation. It holds movement state, battery level, and a dynamically generated inline SVG sprite with animated wheels and customizable body colors. Position updates (`up`, `down`) are intended to be forwarded to the backend in future iterations.
+
+### Constructor
+
+```javascript
+constructor(intialPos, aceleration, velocity, jumpDistanceY, battery?, colors?)
+```
+
+<ParamField path="intialPos" type="object" required>
+  Initial position of the car as `{ x: number, y: number }`. Assigned directly to `this.position`.
+</ParamField>
+
+<ParamField path="aceleration" type="number" required>
+  Acceleration value stored on the instance.
+</ParamField>
+
+<ParamField path="velocity" type="number" required>
+  Velocity value stored on the instance.
+</ParamField>
+
+<ParamField path="jumpDistanceY" type="number" required>
+  The vertical distance the car travels during a jump animation.
+</ParamField>
+
+<ParamField path="battery" type="number" optional>
+  Starting battery level. Defaults to `100`.
+</ParamField>
+
+<ParamField path="colors" type="object" optional>
+  An object with keys `c1`, `c2`, and `c3` for the three body color zones. Defaults to `{ c1: '#fc0324', c2: '#c20000ff', c3: '#d7fc03ff' }`.
+</ParamField>
+
+The constructor immediately calls `getSVGCar()` and stores the result in `this.sprite`.
+
+### Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `aceleration` | `number` | Current acceleration value. |
+| `velocity` | `number` | Current velocity value. |
+| `battery` | `number` | Remaining battery percentage (0–100). |
+| `colorsCar` | `{ c1: string, c2: string, c3: string }` | Current body color triplet used when generating the SVG sprite. |
+| `sprite` | `string` | The full inline SVG string for the car, regenerated whenever colors change. |
+| `jumpDistanceY` | `number` | Vertical jump distance in pixels. |
+| `position` | `{ x: number, y: number }` | Current pixel position of the car on the canvas. |
+
+### Methods
+
+#### `up()`
+
+Decrements `position.y` by 10, moving the car upward on the road.
+
+---
+
+#### `down()`
+
+Increments `position.y` by 10, moving the car downward on the road.
+
+---
+
+#### `jump()`
+
+Stores the current `colorsCar` in a private field, replaces colors with `{ c1: '#000', c2: 'gray', c3: 'green' }`, and calls `getSVGCarAgain()` to regenerate the sprite for the jump visual state.
+
+---
+
+#### `afterJump()`
+
+Restores the original `colorsCar` saved before the jump and calls `getSVGCarAgain()` to revert the sprite.
+
+---
+
+#### `getSVGCarAgain()`
+
+Convenience wrapper that sets `this.sprite = this.getSVGCar()`. Call this whenever `colorsCar` changes and you need the stored sprite to reflect the new colors.
+
+---
+
+#### `getSVGCar()`
+
+Generates and returns the complete inline SVG string for the car using the current `this.colorsCar` values. The SVG includes:
+
+- A side-view car body with three color zones (`c1` main body, `c2` shadow/underside, `c3` headlights).
+- Two animated wheel groups that bounce vertically using `<animateTransform>`.
+- A rain/speed line that translates horizontally and fades with `<animate>`.
+
+<ResponseField name="return" type="string">
+  A complete, self-contained SVG string ready to be injected into the DOM.
+</ResponseField>
+
+---
+
+#### `decreaseBattery(howMuch)`
+
+Calls the parent class `decreaseBattery()` stub. Full battery-drain logic is commented out pending implementation.
+
+<ParamField path="howMuch" type="number" required>
+  The amount to subtract from `battery`. Not currently applied inside the method body.
+</ParamField>
+
+---
+
+#### `checkCollision()`
+
+Stub method. Intended to call `Car.service.js` and trigger collision detection against the backend. Not yet implemented.
+
+---
+
+## RectCollider
+
+**File:** `src/app/models/RectCollider.model.mjs`
+
+`RectCollider` is a **stub placeholder** for a future axis-aligned bounding-box collision system. The entire file currently contains only a single comment:
+
+```javascript
+// TODO: Take two points and get it's area, add methods like "isCollision()", "getArea()"...
+```
+
+<Warning>
+  This class has no implementation. It is reserved for future rectangle-based collision detection between the car and obstacles. Do not instantiate or reference it in production code until it is fully implemented.
+</Warning>
+
+The planned API, as described in the source comment, will accept two points, compute the bounding area, and expose methods such as `isCollision()` and `getArea()`.

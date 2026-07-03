@@ -1,0 +1,100 @@
+---
+title: "Delete an Obstacle from the AVL Tree"
+sidebarTitle: "Delete Obstacle"
+description: "Remove an obstacle from the AVL tree by entering its X/Y pixel coordinates in the Delete Obstacle dialog from the Watch Roads view."
+---
+
+When you need to remove a specific obstacle from the AVL tree, the Delete Obstacle dialog lets you do so by supplying the obstacle's exact pixel coordinates. The request is sent to the backend, the obstacle is removed from both the server-side AVL tree and the client-side road model, and the D3.js visualization redraws to reflect the updated structure.
+
+## Entry point
+
+The Delete Obstacle dialog is only accessible from the **Watch Roads** view. Click the **Delete/Remove** button (`#btn-del`) in the traversal button bar. This calls `WatchRoadsController.__deleteObstacle()`, which in turn calls the static `DeleteObstacle.init(avlCtrl)` method — creating the modal and wiring its event handlers.
+
+```js
+// WatchRoadsController
+__deleteObstacle(ev) {
+    this.deleteObstacle = DeleteObstacle.init(this.avlCtrl);
+}
+```
+
+## How to find an obstacle's coordinates
+
+Each node in the D3.js tree SVG renders a text label directly below its circle in the format `(x, y)` — for example, `(100, 50)`. These are the exact pixel values you must enter into the Delete Obstacle form.
+
+```js
+// AVLController.__render() — coordinate label rendering
+nodosVisuales.append('text').text((nodo) => `(${nodo.data.x}, ${nodo.data.y})`);
+```
+
+Look at the tree in the Watch Roads view, identify the node you want to remove, and note its `(x, y)` label before opening the dialog.
+
+## Form fields
+
+The **Remove Obstacle** modal contains a single fieldset with two required number inputs:
+
+| Field | Element ID | Type | Required | Description |
+|-------|-----------|------|----------|-------------|
+| X | `#obstacle-x` | `number` | Yes | The exact X pixel coordinate of the obstacle |
+| Y | `#obstacle-y` | `number` | Yes | The exact Y pixel coordinate of the obstacle |
+
+Both fields accept decimal values — `parseFloat()` is used to read them, matching the precision used when the obstacle was originally inserted.
+
+## Steps
+
+<Steps>
+  <Step title="Open the Watch Roads view">
+    If you are not already in the Watch Roads view, click **Remove & Watch Roads** on the home screen. The AVL tree renders in the main panel with coordinate labels below each node circle. See [Visualize AVL Tree Traversals](/guides/watch-roads) for details on loading this view.
+  </Step>
+
+  <Step title="Note the target obstacle's coordinates">
+    Find the obstacle you want to delete in the tree SVG. Read the `(x, y)` label rendered beneath its circle — for example, `(300, 80)`. You will need these exact values in the next step.
+  </Step>
+
+  <Step title="Click Delete/Remove">
+    Click the **Delete/Remove** button (`#btn-del`) in the button bar. The **Remove Obstacle** modal dialog opens. It contains two number inputs labelled **X** and **Y**.
+  </Step>
+
+  <Step title="Enter the obstacle's coordinates">
+    Type the X and Y values you noted from the tree label into the corresponding inputs. Both fields are required — submitting with either field empty will trigger form validation and show a toast warning without making any request.
+  </Step>
+
+  <Step title="Click Delete to confirm">
+    Click the **Delete** button. `DeleteObstacle.#delete()` executes the following sequence:
+
+    1. **Validates the form** (`#form-delete-obstacle`) — if either field is empty, a warning toast is shown and the method returns early.
+    2. **Reads the form data** — `parseFloat()` is applied to both inputs to produce `{ x, y }`.
+    3. **POSTs to `/avl/node/remove`**:
+
+    ```http
+    POST /avl/node/remove
+    Content-Type: application/json
+
+    { "x": 300, "y": 80 }
+    ```
+  </Step>
+
+  <Step title="Handle the response">
+    On `status 200` the controller:
+
+    1. **Shows a success toast** with the backend's response message.
+    2. **Removes the obstacle from the client-side road model** by calling `road.removeObstacle({ x, y })`. This finds the first obstacle in the `obstacles` array whose `x` and `y` match and splices it out.
+    3. **Redraws the tree** by calling `avlCtrl.getTree()`, which emits `get_tree_avl` to the backend. The backend responds with the re-balanced tree via `avl_tree_balanced`, and the D3.js SVG is fully redrawn.
+    4. **Closes the modal** — `DeleteObstacle.#closeMenu()` removes it from the DOM.
+
+    On a non-200 response, a danger toast is shown with the backend's error message and the modal remains open so you can correct the input and try again.
+  </Step>
+</Steps>
+
+<Warning>
+  Deletion is matched by **coordinate equality** — the backend receives `{ x, y }` and locates the node in the AVL tree by those values. If two obstacles were inserted at identical coordinates, the behaviour depends entirely on the backend implementation. On the client side, `road.removeObstacle({ x, y })` uses `Array.findIndex()` and removes only the **first** matching entry it finds.
+</Warning>
+
+## Backend endpoint reference
+
+| Method | Path | Request body | Success response |
+|--------|------|-------------|-----------------|
+| `POST` | `/avl/node/remove` | `{ "x": <number>, "y": <number> }` | `{ "status": 200, "message": "..." }` |
+
+## What happens to the tree after deletion
+
+Because the backend maintains a proper AVL tree, removing a node may trigger one or more rotations to restore the balance invariant. The `avlCtrl.getTree()` call fetches the fully re-balanced tree after the deletion, so the SVG always reflects the correct balanced structure — not just a naive node removal.

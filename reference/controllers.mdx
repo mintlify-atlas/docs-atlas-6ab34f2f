@@ -1,0 +1,299 @@
+---
+title: "Controller Classes and Public Methods"
+sidebarTitle: "Controllers"
+description: "API reference for all six controller classes in AVL Tree Car Front: HomeController, RoadController, AVLController, ObstaclesController, WatchRoadsController, and LoadJSONController."
+---
+
+Controllers are the coordination layer of the application. Each controller owns a slice of the user interface — a modal, a view, or a button group — and orchestrates the model and service classes needed to fulfill that slice's purpose. Controllers are lazily instantiated: `HomeController` creates its peers only when the user clicks the corresponding button, preventing unnecessary initialization on startup.
+
+---
+
+## HomeController
+
+**File:** `src/app/controllers/Home.controller.js`
+
+`HomeController` is the application root. It owns the main navigation buttons, instantiates `TreeService` once on first load, and lazily creates all other controllers on demand. It is also the re-entry point after navigating away from a view — calling `init(true)` from a child controller causes the home screen to reload with the existing AVL tree already rendered.
+
+### `init(isReload?)`
+
+The primary entry point. Loads the home HTML template into `<main>`, queries all button elements, and registers their click listeners. On first call it also creates `this.treeService` and emits `reset_avl` to clear any stale backend state.
+
+<ParamField path="isReload" type="boolean" optional>
+  When `true`, the method calls `this.controllers.AVL.init(true)` after setting up listeners, which triggers a fresh `get_tree_avl` emit and re-renders the current tree without discarding controller state. Defaults to `false`.
+</ParamField>
+
+```javascript
+// Typical usage from a child controller navigating back to home
+this.homeCtrl.init(true);
+```
+
+---
+
+### `disableEnable(customs?, enable?)`
+
+Enables or disables the navigation buttons. By default (no arguments) it iterates over every element in `this.elements` and disables all of them except `btn-create-road` and `btn-load-json`, which remain enabled at all times. Pass a custom key array and `enable=true` to re-enable specific buttons after a prerequisite action completes.
+
+<ParamField path="customs" type="string[]" optional>
+  Array of keys from `this.elements` to target (e.g. `['btnWatchRoads', 'btnInsertObstacles']`). When `null` or omitted, all element keys are targeted.
+</ParamField>
+
+<ParamField path="enable" type="boolean" optional>
+  When `true`, removes the `disabled` attribute from the targeted elements. When `false` (default), adds the `disabled` attribute — but always skips `btn-create-road` and `btn-load-json`.
+</ParamField>
+
+```javascript
+// Enable only the Watch Roads and Insert Obstacles buttons
+this.homeCtrl.disableEnable(['btnWatchRoads', 'btnInsertObstacles'], true);
+```
+
+<Note>
+  `btnCreateRoad` and `btnLoadJson` are always kept enabled regardless of the `enable` argument, ensuring the user can always start a new session or load data from a file.
+</Note>
+
+---
+
+## RoadController
+
+**File:** `src/app/controllers/Road.controller.js`
+
+`RoadController` owns the road creation flow. It instantiates the `Road` model and manages the "Create Road" modal that lets the user define the road's pixel dimensions. Once the user confirms the form, the controller applies the sizes to the model, emits a tree reset, and dispatches the `road-created` custom event so `HomeController` can advance the workflow.
+
+### Constructor
+
+```javascript
+constructor(treeService?)
+```
+
+<ParamField path="treeService" type="TreeService" optional>
+  An existing `TreeService` instance to use for emitting `reset_avl` when the road is confirmed. Defaults to `null`; the controller will not emit socket events if this is absent.
+</ParamField>
+
+Immediately creates `this.road = new Road()` with default dimensions.
+
+---
+
+### `init(menu?)`
+
+Async. Injects `road.html` into `<main>` and, when `menu` is `true`, creates and displays the "Create Road" modal with width/height inputs and Accept/Cancel buttons.
+
+<ParamField path="menu" type="boolean" optional>
+  When `true` (default), shows the configuration modal. When `false`, the road HTML is still loaded but no modal is displayed — reserved for future headless initialization.
+</ParamField>
+
+---
+
+### `getRoad()`
+
+Returns the current `Road` model instance held by this controller. All other controllers that need road dimensions or the obstacle list call this method.
+
+<ResponseField name="return" type="Road">
+  The single `Road` instance created in the constructor.
+</ResponseField>
+
+---
+
+## AVLController
+
+**File:** `src/app/controllers/AVL.controller.js`
+
+`AVLController` is the bridge between the Python backend's AVL tree and the D3.js rendering layer. It holds an `AVL` model instance, a `TreeService` socket connection, and a reference to `RoadController` for obstacle lookups. The constructor calls `init()` immediately so the tree container HTML is always injected as soon as the controller is created.
+
+### Constructor
+
+```javascript
+constructor(roadCtrl)
+```
+
+<ParamField path="roadCtrl" type="RoadController" required>
+  The road controller whose `getRoad()` provides obstacle data for node enrichment.
+</ParamField>
+
+Creates `this.avl = new AVL()`, `this.service = new TreeService()`, stores `roadCtrl`, and calls `this.init()`.
+
+---
+
+### `init(isReload?)`
+
+Renders the tree container HTML (via `TreeRender()`), clears the SVG element, and registers the `avl_tree_balanced` DOM event listener. If `isReload` is `true` it also emits `get_tree_avl` so the backend immediately sends the current tree.
+
+<ParamField path="isReload" type="boolean" optional>
+  When `true`, calls `this.getTree()` after setup to trigger an immediate tree fetch from the backend. Defaults to `false`.
+</ParamField>
+
+---
+
+### `send_roads_to_backend(data)`
+
+Async. Sends obstacle data to `POST /avl/node/add` and displays a success or error toast based on the response status.
+
+<ParamField path="data" type="object" required>
+  The obstacle payload to POST. Typically the serialized `Obstacle` instance collected from the Add Obstacles form.
+</ParamField>
+
+<ResponseField name="return" type="object">
+  The parsed JSON response object from the backend with the shape:
+
+  ```json
+  {
+    "status": 200,
+    "message": "...",
+    "data": "obstacle-id",
+    "error": null
+  }
+  ```
+</ResponseField>
+
+<Warning>
+  This method throws `Error("Don't was possible communicate with the backend!")` if the fetch returns a falsy response. Always call it inside a `try/catch` block.
+</Warning>
+
+---
+
+### `listenGetTreeFromBackend()`
+
+Registers two `avl_tree_balanced` listeners on `document`: one no-op (preserving any previously registered handler) and one that calls `this.initDataTree(event)`. Called internally by `init()`.
+
+---
+
+### `initDataTree(event)`
+
+Processes an `avl_tree_balanced` CustomEvent dispatched by `TreeService`. Resets `avl.root` to `null`, assigns the event detail as the new root, calls `formatNodes()` to enrich the node hierarchy with obstacle data, and then calls `__renderTree()` to draw the updated tree.
+
+<ParamField path="event" type="CustomEvent" required>
+  The `avl_tree_balanced` event whose `detail` is the raw tree structure returned by `tree.to_dict()` on the backend.
+</ParamField>
+
+---
+
+### `formatNodes()`
+
+Entry point for the node enrichment pass. Delegates to the private `__formatNodes(current)` recursive method, which walks every node in the tree and copies `x`, `y`, and `type` from the matching `Obstacle` in the road model.
+
+---
+
+### `getTree()`
+
+Emits `get_tree_avl` via the `TreeService` socket, requesting the backend to respond with the current balanced tree.
+
+---
+
+### `getRoadCtrl()`
+
+<ResponseField name="return" type="RoadController">
+  The `RoadController` instance passed to the constructor. Used by `WatchRoadsController` and `LoadJSONController` to access road and obstacle data.
+</ResponseField>
+
+---
+
+## ObstaclesController
+
+**File:** `src/app/controllers/Obstacles.controller.js`
+
+`ObstaclesController` manages the "Add Obstacles" modal. On each call to `init()` it fetches the list of valid obstacle types from the backend, builds a `<select>` element, and shows the modal. When the user submits, it validates the form, constructs an `Obstacle` instance, calls `AVLController.send_roads_to_backend()`, and — on success — adds the obstacle to the road model and triggers a tree re-render.
+
+### `init(roadCtrl, AVLCtrl, homeCtrl?)`
+
+Async. The sole public method. Bootstraps the entire Add Obstacles workflow.
+
+<ParamField path="roadCtrl" type="RoadController" required>
+  Used to read road dimensions for input validation and to call `road.setObstacle()` on success. Throws `Error('Missing Road')` if absent.
+</ParamField>
+
+<ParamField path="AVLCtrl" type="AVLController" required>
+  Used to send the new obstacle to the backend and to call `getTree()` after a successful insert. Throws `Error('Missing AVL')` if absent.
+</ParamField>
+
+<ParamField path="homeCtrl" type="HomeController" optional>
+  When provided, `disableEnable(['btnWatchRoads'], true)` is called after the first obstacle is successfully added to enable the Watch Roads button. Defaults to `null`.
+</ParamField>
+
+<Note>
+  The obstacle type list is fetched fresh from `GET /data/json/obstacles_types.json` on every `init()` call. The global `OBSTACLES_TYPES` variable is populated from the same endpoint during application bootstrap.
+</Note>
+
+---
+
+## WatchRoadsController
+
+**File:** `src/app/controllers/WatchRoads.controller.js`
+
+`WatchRoadsController` renders the tree visualization view and wires up the traversal buttons (Pre-order, In-order, Post-order). It listens for traversal events from the backend and highlights the corresponding node circle in the SVG as each node is visited.
+
+### Constructor
+
+```javascript
+constructor(avlCtrl, homeCtrl)
+```
+
+<ParamField path="avlCtrl" type="AVLController" required>
+  The AVL controller used to render and query the tree. Throws `Error('I need a Tree to work!')` if `null` or `undefined`.
+</ParamField>
+
+<ParamField path="homeCtrl" type="HomeController" required>
+  Used by the Back button handler to call `homeCtrl.init(true)` and return to the home view.
+</ParamField>
+
+---
+
+### `init()`
+
+Async. The main entry point. Executes three steps in sequence:
+
+1. **`__cleanMain()`** — Fetches `watchRoads.html` and replaces `<main>` content.
+2. **`__callRenderTree()`** — Calls `avlCtrl.init()`, emits `get_tree_avl`, and waits for the `avl_tree_balanced` event before resolving. Queries all button and obstacle SVG elements after the tree renders.
+3. **`__callListeners()`** — Attaches click handlers to the Pre-order, In-order, Post-order, Back, and Delete buttons, and registers `pre-order`, `in-order`, and `pos-order` document event listeners that animate node focus.
+
+```javascript
+// Inside HomeController
+this.controllers.WatchRoads = new WatchRoadsController(this.controllers.AVL, this);
+await this.controllers.WatchRoads.init();
+```
+
+---
+
+## LoadJSONController
+
+**File:** `src/app/controllers/LoadJson.controller.js`
+
+`LoadJSONController` handles bulk obstacle import from a JSON file. It presents the "Load Obstacles From JSON" modal, accepts a file via a file-input element, displays the parsed content in a textarea, and — when the user confirms — resets the backend AVL tree, POSTs the JSON to `/avl/add/configs`, and populates the road model with the returned obstacle IDs.
+
+### Constructor
+
+```javascript
+constructor(avl, home)
+```
+
+<ParamField path="avl" type="AVLController" required>
+  The AVL controller. Throws `Error('Missing The AVL Controller!')` if `null` or `undefined`. Also used to access `avl.getRoadCtrl()` and therefore the road model.
+</ParamField>
+
+<ParamField path="home" type="HomeController" required>
+  Used to call `disableEnable(['btnInsertObstacles', 'btnWatchRoads'], true)` after a successful import so the user can immediately interact with the loaded obstacles.
+</ParamField>
+
+---
+
+### `init()`
+
+Async. The sole public method. Executes the full modal lifecycle:
+
+1. Fetches `loadJSON.html` and stores it.
+2. Creates a `Modal` instance titled "Load Obstacles From JSON" with Cancel and Accept buttons.
+3. Shows the modal and queries the file input and textarea elements.
+4. Attaches a `change` listener to the file input that reads the selected file with `FileReader` and populates the textarea with its text content.
+
+When the user clicks Accept:
+- Calls `avlCtrl.service.emit_reset_avl()` to clear the backend tree.
+- Parses the textarea content as JSON.
+- POSTs to `POST /avl/add/configs`.
+- On `status 200`: sets the road width from `configs.total_distance` (if present), builds `Obstacle` instances from the returned ID array, calls `road.setObstacles()`, calls `avlCtrl.getTree()`, enables the Insert Obstacles and Watch Roads buttons, and closes the modal.
+
+```javascript
+// Inside HomeController's Load JSON button listener
+this.controllers.LoadJSON = new LoadJSONController(this.controllers.AVL, this);
+this.controllers.LoadJSON.init();
+```
+
+<Note>
+  The modal's Accept action first emits `reset_avl` before sending the new data. Any obstacles previously added to the backend tree are cleared before the JSON payload is processed.
+</Note>
