@@ -1,5 +1,5 @@
 ---
-title: "Get Started with AVL Tree Car Front"
+title: "Quickstart: Install, Configure, and Run AVL Tree Car Front"
 sidebarTitle: "Quickstart"
 description: "Clone AVL Tree Car Front, configure the backend URL, and open the SPA with a Live Server to start visualizing AVL trees in under 5 minutes."
 ---
@@ -80,5 +80,5 @@ AVL Tree Car Front is a zero-build SPA — there are no dependencies to install 
 </Steps>
 
 <Note>
-  Every time the page is reloaded, the front-end state resets completely to zero — the application always starts fresh in the browser. However, the Python backend retains its tree history across reloads. To avoid the front end and backend falling out of sync, click **Create Road** after each page reload to reset the backend's AVL tree and start from a clean state on both sides.
+  Every time the page is reloaded, the front-end state resets completely to zero — the application always starts fresh in the browser. However, the Python backend retains its tree history across reloads. To handle this, `HomeController.init()` automatically emits a `reset_avl` event to the backend on every page load, resetting the server-side AVL tree so both sides start from a clean state.
 </Note>

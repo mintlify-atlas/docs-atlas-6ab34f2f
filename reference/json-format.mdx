@@ -172,11 +172,12 @@ The reset sequence is:
 
 After a successful response the controller calls `#setObstaclesFromTextArea(req.data)`, which:
 
-1. Re-parses the textarea content as JSON.
-2. Iterates `json.obstacles` in order, pairing each entry with its assigned ID from `req.data`.
-3. Uppercases the first character of each `type` string.
-4. Constructs a `new Obstacle({ id, x, y, type, is_type_str: true })` for each entry. The `is_type_str: true` flag tells `Obstacle.format_values()` to match the type by string name rather than numeric ID.
-5. Calls `road.setObstacles(obstaclesList)` to replace the road's obstacle array with the newly built list.
+1. Checks that `element.textLength >= 50`; if the textarea content is shorter than 50 characters the method returns early and no obstacles are built.
+2. Re-parses the textarea content as JSON.
+3. Iterates `json.obstacles` in order, pairing each entry with its assigned ID from `req.data`.
+4. Uppercases the first character of each `type` string.
+5. Constructs a `new Obstacle({ id, x, y, type, is_type_str: true })` for each entry. The `is_type_str: true` flag tells `Obstacle.format_values()` to match the type by string name rather than numeric ID.
+6. Calls `road.setObstacles(obstaclesList)` to replace the road's obstacle array with the newly built list.
 
 <Note>
   The `id` field in each constructed `Obstacle` comes from the backend response, not from the JSON file. Do not include an `id` key in your obstacle objects — it will be ignored.

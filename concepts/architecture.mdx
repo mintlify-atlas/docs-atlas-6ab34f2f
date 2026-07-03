@@ -123,7 +123,7 @@ this.elements.btnCreateRoad.addEventListener('click', async (ev) => {
 });
 ```
 
-`RoadController` and `AVLController` receive a reference to the shared `TreeService` instance so all socket communication funnels through the same connection.
+`RoadController` receives a reference to the shared `TreeService` instance created in `HomeController`. `AVLController` creates its own internal `TreeService` instance (`this.service = new TreeService()`) in its constructor, so it has a separate socket connection dedicated to AVL tree operations.
 
 <Tip>
   `HomeController.disableEnable()` is the single place that enables or disables toolbar buttons. Buttons other than **Create Road** and **Load JSON** start disabled and are unlocked progressively as the user sets up prerequisites.

@@ -48,14 +48,14 @@ The **Create Road** button is always enabled on the home screen. Clicking it ope
     Click **Accept**. The `RoadController.#addActionMenu()` method runs the following sequence:
 
     1. **Validates** the form — if the input is empty or invalid, a warning toast is shown and the action stops.
-    2. **Reads dimensions** from the live DOM:
+    2. **Shows a success toast**: *Road created succesfully!*
+    3. **Reads dimensions** from the live DOM and calls `road.setSizes({ width, height, top })` on the `Road` model:
        - `width` — the numeric value from `#inp-road-width`.
        - `height` — computed from the `#road-container` element's CSS height.
        - `top` — computed from the `#road-container` element's CSS `top` property (defaults to `0` if `NaN`).
-    3. **Calls `road.setSizes({ width, height, top })`** on the `Road` model, persisting the dimensions client-side.
     4. **Emits `reset_avl`** via Socket.IO (`TreeService.emit_reset_avl()`) to clear the backend tree.
     5. **Dispatches the `road-created` DOM event**, which `HomeController` listens for and uses to automatically trigger a click on the **Insert Obstacles** button — opening the Add Obstacles dialog immediately.
-    6. Shows a success toast: *Road created successfully!*
+    6. **Closes the modal.**
   </Step>
 
   <Step title="Continue to Add Obstacles">

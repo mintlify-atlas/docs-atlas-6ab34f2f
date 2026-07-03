@@ -238,11 +238,11 @@ Emits `remove_obstacle` to instruct the backend to delete an obstacle from the A
 
 `ObstacleService` is a REST-only stub class. It was intended to validate obstacle coordinates against the backend before insertion, but the validation call is not used in the current production flow — `ObstaclesController` bypasses it with a hardcoded `{ ok: true }` response.
 
-### `validateCoordinates(coordinates)`
+### `validateCoordinates(cooridates)`
 
 Makes a `POST /obstacles/validateCoordinates` request with the supplied coordinates as the body.
 
-<ParamField path="coordinates" type="object" required>
+<ParamField path="cooridates" type="object" required>
   The coordinate object to validate. Expected to contain `x` and `y` fields.
 </ParamField>
 

@@ -144,8 +144,14 @@ Async. Sends obstacle data to `POST /avl/node/add` and displays a success or err
 </ResponseField>
 
 <Warning>
-  This method throws `Error("Don't was possible communicate with the backend!")` if the fetch returns a falsy response. Always call it inside a `try/catch` block.
+  Returns `undefined` if `this.roadController.getRoad()` is falsy (no road created yet). Throws `Error("Don't was possible communicate with the backend!")` if the fetch returns a falsy response. Always call it inside a `try/catch` block.
 </Warning>
+
+---
+
+### `removeObstacleFromTree()`
+
+Delegates to `this.service.emit_remove_obstacle()` with no arguments, emitting the `remove_obstacle` socket event so the backend can delete the selected obstacle from the AVL tree.
 
 ---
 

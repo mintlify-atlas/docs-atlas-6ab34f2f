@@ -99,6 +99,7 @@ These are events that arrive from the Python backend. Every meaningful event is 
 | Socket event | DOM `CustomEvent` dispatched | `detail` shape | Description |
 |---|---|---|---|
 | `connected` | — | — | Backend confirms the Socket.IO connection is established |
+| `disconnected` | — | — | Backend confirms the Socket.IO connection was closed |
 | `avl_tree_balanced` | `avl_tree_balanced` | Tree root node object | Full balanced AVL tree for rendering |
 | `preorder` | `pre-order` | Obstacle `id` (string) | Next node ID in the pre-order traversal sequence |
 | `inorder` | `in-order` | Obstacle `id` (string) | Next node ID in the in-order traversal sequence |
@@ -107,7 +108,7 @@ These are events that arrive from the Python backend. Every meaningful event is 
 | `obstacles_inserted` | — | — | Confirms an obstacle was successfully inserted |
 
 <Note>
-  The `connected` and `obstacles_inserted` events are handled silently (a `console.log` for `connected`; an empty handler for `obstacles_inserted`). They do not dispatch DOM events and are not consumed by any controller.
+  The `connected`, `disconnected`, and `obstacles_inserted` events are handled silently — `connected` and `disconnected` each log a message to the console, while `obstacles_inserted` has an empty handler. None of the three dispatch DOM events or are consumed by any controller.
 </Note>
 
 ## DOM event bridge pattern
